@@ -326,7 +326,7 @@
           ]
         }
       ],
-      "icon": "assets/Natively.icon",
+      "icon": "assets/icons/mac/icon.icns",
       "identity": null,
       "hardenedRuntime": false,
       "artifactName": "FREECLUELY-${version}-${arch}.${ext}",
