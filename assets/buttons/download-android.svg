@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="52" viewBox="0 0 360 52" fill="none">
+  <rect width="360" height="52" rx="26" fill="#16A34A"/>
+  <!-- Android-style icon -->
+  <g transform="translate(21, 16)" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M4 13a8 8 0 0 1 16 0v2H4v-2z"/>
+    <path d="M7 5l-2-3"/>
+    <path d="M17 5l2-3"/>
+    <circle cx="9" cy="10" r="1" fill="#FFFFFF" stroke="none"/>
+    <circle cx="15" cy="10" r="1" fill="#FFFFFF" stroke="none"/>
+  </g>
+  <text x="52" y="31" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Use on Android</text>
+  <line x1="176" y1="14" x2="176" y2="38" stroke="rgba(255,255,255,0.38)" stroke-width="1.5"/>
+  <text x="190" y="30" fill="rgba(255,255,255,0.92)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500">Free · Phone Mirror</text>
+</svg>

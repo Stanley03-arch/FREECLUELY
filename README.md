@@ -23,26 +23,35 @@ Download the latest release for your device from [GitHub Releases](https://githu
 
 <p align="center">
   <a href="https://github.com/Stanley03-arch/FREECLUELY/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
+    <img src="assets/buttons/download-windows.svg" height="52" alt="Download for Windows" />
   </a>
+  &nbsp;
   <a href="https://github.com/Stanley03-arch/FREECLUELY/releases/latest">
-    <img src="https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+    <img src="assets/buttons/download-macos.svg" height="52" alt="Download for Mac" />
   </a>
+  &nbsp;
   <a href="https://github.com/Stanley03-arch/FREECLUELY/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
+    <img src="assets/buttons/download-linux.svg" height="52" alt="Download for Linux" />
   </a>
 </p>
 
 <p align="center">
   <a href="#phone-mirror-ios--android">
-    <img src="https://img.shields.io/badge/iOS-Phone%20Mirror%20Companion-007AFF?style=for-the-badge&logo=apple&logoColor=white" alt="iOS Phone Mirror" />
+    <img src="assets/buttons/download-ios.svg" height="48" alt="Use on iOS" />
   </a>
+  &nbsp;
   <a href="#phone-mirror-ios--android">
-    <img src="https://img.shields.io/badge/Android-Phone%20Mirror%20Companion-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android Phone Mirror" />
+    <img src="assets/buttons/download-android.svg" height="48" alt="Use on Android" />
   </a>
 </p>
 
-<small>Desktop installers: Windows 10/11 (`.exe`), macOS 12+ Apple Silicon & Intel (`.dmg` / `.zip`), Linux (`.AppImage` / `.deb`). Mobile: iOS & Android connect via built-in Phone Mirror.</small>
+<p align="center">
+  <a href="https://ollama.com/download">
+    <img src="assets/buttons/download-ollama.svg" height="50" alt="Download Free Llama (Ollama)" />
+  </a>
+</p>
+
+<small>Desktop installers: Windows 10/11 (`.exe`), macOS 12+ Apple Silicon & Intel (`.dmg` / `.zip`), Linux (`.AppImage` / `.deb`). Mobile: iOS & Android connect via built-in Phone Mirror. No API key? Click **Download Free Llama** above.</small>
 
 ---
 

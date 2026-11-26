@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="52" viewBox="0 0 360 52" fill="none">
+  <rect width="360" height="52" rx="26" fill="#27272A" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+  <!-- Phone icon -->
+  <g transform="translate(22, 15)" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <rect x="2" y="0" width="14" height="22" rx="3"/>
+    <line x1="8" y1="18" x2="10" y2="18"/>
+  </g>
+  <text x="50" y="31" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Use on iOS</text>
+  <line x1="148" y1="14" x2="148" y2="38" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+  <text x="162" y="30" fill="rgba(255,255,255,0.88)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="500">Free · Phone Mirror (Safari)</text>
+</svg>
