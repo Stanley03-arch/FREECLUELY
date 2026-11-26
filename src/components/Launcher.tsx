@@ -1149,13 +1149,13 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                             // bloom colour is set here: no inline `transition`, which would
                                             // override the stylesheet's and make the hover jump again.
                                             style={{
-                                                '--cta-glow': isMeetingActive ? '16, 185, 129' : '14, 165, 233',
+                                                '--cta-glow': isMeetingActive ? '16, 185, 129' : '6, 182, 212',
                                                 '--cta-glow-a': isMeetingActive ? '0.45' : '0.4',
                                             } as React.CSSProperties}
                                         >
-                                            {/* Blue gradient layer (idle) */}
+                                            {/* Emerald-Teal gradient layer (idle) */}
                                             <div
-                                                className="absolute inset-0 bg-gradient-to-b from-sky-400 via-sky-500 to-blue-600 transition-opacity duration-[360ms] ease-apple-ease"
+                                                className="absolute inset-0 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 transition-opacity duration-[360ms] ease-apple-ease"
                                                 style={{ opacity: isMeetingActive ? 0 : 1 }}
                                             />
                                             {/* Green gradient layer (meeting active) */}
@@ -1204,18 +1204,9 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                                             transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
                                                             className="flex items-center gap-3"
                                                         >
-                                                            {/* The brand mark (brand/natively-mark-white.svg) drawn
-                                                                inline: its ring and strokes are heavier than icon.png's,
-                                                                which read thin at 18px on this button. icon.png stays
-                                                                as it is for the other screens that use it. */}
-                                                            <svg
-                                                                viewBox="106 106 812 812" aria-hidden
-                                                                className="w-[18px] h-[18px] shrink-0 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.1)] opacity-90"
-                                                            >
-                                                                <path fill="currentColor" d="M512 106 A406 406 0 1 1 512 918 A406 406 0 1 1 512 106 Z M512 181 A331 331 0 1 0 512 843 A331 331 0 1 0 512 181 Z M288 194.91 H363 V829.09 H288 Z M661 194.91 H736 V829.09 H661 Z M269.75 211 L359.44 211 L754.25 813 L664.56 813 Z" />
-                                                            </svg>
+                                                            <Sparkles className="w-[18px] h-[18px] shrink-0 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.1)] opacity-90" />
                                                             <span className="drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)] text-[20px] leading-none">
-                                                                {t('Start Natively')}
+                                                                {t('Start FREECLUELY')}
                                                             </span>
                                                         </motion.div>
                                                     )}

@@ -161,28 +161,21 @@
   --bubble-user-bg: var(--toggle-on);
   --bubble-user-fg: #FFFFFF;
 
-  /* --- SEMANTIC TOKEN SYSTEM (DEFAULT: DARK) --- */
-  /* Reference Image Matching */
-  --bg-sidebar: #18181B;
-  /* User Spec: Side Panel */
-  --bg-main: #1E1E21;
-  /* User Spec: Main BG */
-  --bg-card: #242429;
-  /* User Spec: Detectable Container */
+  /* --- SEMANTIC TOKEN SYSTEM (FREECLUELY OBSIDIAN-SLATE DARK) --- */
+  --bg-sidebar: #0B0F14;
+  --bg-main: #0F141B;
+  --bg-card: #151C26;
 
-  --bg-toggle-switch: #303033;
-  /* User Spec: Toggle Button */
-  --bg-item-surface: #27272A;
-  /* User Spec: Icons & Input Backgrounds */
-  --bg-item-active: #2C2C2C;
-  /* Selected state */
+  --bg-toggle-switch: #1E293B;
+  --bg-item-surface: #1B2431;
+  --bg-item-active: #222D3D;
   /* Beta pill — SOLID fill, Apple style. systemYellow is brighter in the dark
      appearance and slightly deeper in light, so it is a token pair rather than
      one hex. The foreground is near-black in both: white on yellow is roughly
      1.6:1 and unreadable, #1C1C1E is ~12:1. */
   --badge-beta-bg: #FFD60A;
   --badge-beta-fg: #1C1C1E;
-  --bg-row-hover: #2E2E32;
+  --bg-row-hover: #243041;
   /* Neutral hover fill for full-width list rows sitting on --bg-item-surface.
      Needed because --bg-item-active is blue-tinted in the light theme, and a
      Tailwind opacity modifier (bg-bg-input/40) emits no CSS at all against
