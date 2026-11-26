@@ -24,7 +24,7 @@ import {
 const MAX_TERMS = 100;
 
 /** Providers that take a word list (electron/audio/sttContextTerms.ts). */
-const USES_LIST = new Set(['natively', 'deepgram', 'soniox', 'google', 'groq', 'openai', 'local-whisper']);
+const USES_LIST = new Set(['freecluely', 'deepgram', 'soniox', 'google', 'groq', 'openai', 'local-whisper']);
 
 // A pill comes and goes with SettingsRow's "control" move: 250ms in from 0.96,
 // 150ms out. No `layout`: layout projection broke scrolling in this scroller.
@@ -268,3 +268,4 @@ export const SpeechDictionarySettings: React.FC<{ sttProvider: string }> = ({ st
         </SettingsMotionReady.Provider>
     );
 };
+

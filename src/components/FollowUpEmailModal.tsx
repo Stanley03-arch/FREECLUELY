@@ -59,7 +59,7 @@ const FollowUpEmailModal: React.FC<FollowUpEmailModalProps> = ({ isOpen, onClose
         setSubject(`Follow up - ${cleanTitle}`); // Default subject
 
         // 2. Load Sender Name
-        const storedName = localStorage.getItem('natively_user_name');
+        const storedName = localStorage.getItem('freecluely_user_name');
         if (storedName) setSenderName(storedName);
 
         // 3. Load Recipient (Async)
@@ -298,3 +298,4 @@ const FollowUpEmailModal: React.FC<FollowUpEmailModalProps> = ({ isOpen, onClose
 };
 
 export default FollowUpEmailModal;
+

@@ -11689,7 +11689,7 @@ Provide only the answer, nothing else.`;
       sttUserStatus === 'failed' || sttUserStatus === 'reconnecting' ? sttUserError : '',
       sttInterviewerStatus === 'failed' || sttInterviewerStatus === 'reconnecting' ? sttInterviewerError : '',
     ]);
-    if (cause === 'secure-connection') return t('Antivirus HTTPS scanning or a network filter is intercepting the connection. Allow Natively in your antivirus, or turn off its HTTPS scanning for Natively.');
+    if (cause === 'secure-connection') return t('Antivirus HTTPS scanning or a network filter is intercepting the connection. Allow FREECLUELY in your antivirus, or turn off its HTTPS scanning for FREECLUELY.');
     if (cause === 'unreachable') return t('Natively cannot reach the transcription service. Check your internet connection, and allow Natively in your firewall and antivirus.');
     return null;
   })();
@@ -13632,4 +13632,5 @@ Provide only the answer, nothing else.`;
 };
 
 export default NativelyInterface;
+
 

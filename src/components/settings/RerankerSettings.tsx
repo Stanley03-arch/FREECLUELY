@@ -115,7 +115,7 @@ interface RerankerStatus {
     openrouterModel: string | null;
     jinaModel: string | null;
     voyageModel?: string | null;
-    nativelyModel: string | null;
+    freecluelyModel: string | null;
     customModel: string | null;
     customEndpoint: string | null;
     hasCustomKey: boolean;
@@ -179,7 +179,7 @@ interface ExtensionModel {
  * the source can be read, and a release downloaded and installed by hand
  * through "Install from folder".
  */
-const EXTENSIONS_REPO_URL = 'https://github.com/Brosski224/natively-extensions';
+const EXTENSIONS_REPO_URL = 'https://github.com/Stanley03-arch/FREECLUELY';
 
 interface InstalledExtension {
     id: string;
@@ -501,7 +501,7 @@ const INITIAL_STATUS: RerankerStatus = {
     provider: 'local',
     openrouterModel: null,
     jinaModel: null,
-    nativelyModel: null,
+    freecluelyModel: null,
     customModel: null,
     customEndpoint: null,
     hasCustomKey: false,
@@ -693,8 +693,8 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
             // provider out of THIS list is what makes its card vanish when
             // discovery degrades, and the managed reranker is the one a customer
             // can use without going and getting a second account.
-            id: 'natively', name: 'Natively',
-            keyUrl: 'https://natively.software', keyPlaceholder: 'natively_sk_…',
+            id: 'freecluely', name: 'FREECLUELY',
+            keyUrl: 'https://github.com/Stanley03-arch/FREECLUELY', keyPlaceholder: 'fc_sk_…',
             staticCatalogue: true, hasApiKey: false, models: [],
         }, {
             id: 'openrouter', name: 'OpenRouter',
@@ -773,7 +773,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
         switch (providerId) {
             case 'jina': return { provider: 'jina', jinaModel: model };
             case 'voyage': return { provider: 'voyage', voyageModel: model };
-            case 'natively': return { provider: 'natively', nativelyModel: model };
+            case 'freecluely': return { provider: 'freecluely', freecluelyModel: model };
             default: return { provider: 'openrouter', openrouterModel: model };
         }
     };
@@ -844,7 +844,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
 
     const activeOptionId = useMemo(() => {
         if (!status?.effective) return 'local::built-in';
-        if (status.effective.kind === 'natively'
+        if (status.effective.kind === 'freecluely'
             || status.effective.kind === 'openrouter'
             || status.effective.kind === 'jina'
             || status.effective.kind === 'voyage') {
@@ -876,12 +876,12 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
         setCatalogError(null);
         setCatalogListError(null);
         try {
-            if (kind === 'natively') {
+            if (kind === 'freecluely') {
                 // Its own arm, not the trailing `else`. Without one, picking the
                 // managed reranker fell through to the local branch and silently
                 // set provider:'local' — the picker would show a selection the
                 // app was not using.
-                await window.electronAPI.setRerankerConfig?.({ provider: 'natively', nativelyModel: id });
+                await window.electronAPI.setRerankerConfig?.({ provider: 'freecluely', freecluelyModel: id });
             } else if (kind === 'openrouter') {
                 await window.electronAPI.setRerankerConfig?.({ provider: 'openrouter', openrouterModel: id });
             } else if (kind === 'jina') {
@@ -919,13 +919,13 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
         if (!status) return '';
         const parts: string[] = [];
 
-        if (status.effective.kind === 'natively') {
+        if (status.effective.kind === 'freecluely') {
             // Says where the text goes, the question this option raises. The
             // billing half ("Uses your plan's Knowledge allowance") is NOT
             // repeated here — the Natively provider card below already states
             // it, and on the combined Retrieval page this line sits directly
             // above that card.
-            parts.push(t('Hosted'), t('Document text is sent to Natively'));
+            parts.push(t('Hosted'), t('Document text is sent to FREECLUELY'));
             if (status.lastTest?.ok) parts.push(`${Math.round(status.lastTest.latencyMs)} ms ${t('last test')}`);
         } else if (status.effective.kind === 'openrouter') {
             parts.push(t('Hosted'), t('Document text is sent to OpenRouter'));
@@ -943,7 +943,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
             const localName = status.selectedLocal?.name || (selected ? selected.name : null);
             parts.push(t('On-device'));
             if (localName) parts.push(localName);
-            parts.push(selected ? humanBytes(selected.bytesOnDisk || selected.bytes) : t('Included with Natively'));
+            parts.push(selected ? humanBytes(selected.bytesOnDisk || selected.bytes) : t('Included with FREECLUELY'));
         }
         return parts.join(' · ');
     }, [status, catalogModels, t]);
@@ -1519,7 +1519,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 Natively gets no card (owner decision, 2026-09-22): the server
                 pins its model and the key comes from the Natively plan, so there
                 is nothing to configure. It stays selectable in Active Reranker. */}
-            {hostedProviders.filter(p => p.id !== 'natively').map(p => {
+            {hostedProviders.filter(p => p.id !== 'freecluely').map(p => {
                 const isActive = status.effective.kind === p.id;
                 const isSelected = status.provider === p.id;
                 // status.hasApiKey is the presence flag for the SELECTED
@@ -1529,8 +1529,8 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 const draft = keyDrafts[p.id] ?? '';
                 const saving = savingKeyFor === p.id;
                 const saved = savedKeyFor === p.id;
-                const selectedModel = p.id === 'natively'
-                    ? status.nativelyModel
+                const selectedModel = p.id === 'freecluely'
+                    ? status.freecluelyModel
                     : p.id === 'jina' ? status.jinaModel
                     : p.id === 'voyage' ? (status.voyageModel ?? null)
                     : status.openrouterModel;
@@ -1538,7 +1538,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 // this card must not offer a key field. Rendering one would
                 // invite a paste that reranker:set-hosted-key now refuses
                 // ('not_byok'), and a Remove button that would delete nothing.
-                const byok = p.id !== 'natively';
+                const byok = p.id !== 'freecluely';
                 // A live catalogue arrives from OpenRouter; a static one ships
                 // with the app and is listed even before a key exists, so the
                 // user can see what a key would buy them.
@@ -1575,8 +1575,8 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                             <div className="aip-provider-row">
                                 <p className="text-[11px] text-white/45 leading-relaxed">
                                     {hasKey
-                                        ? t('Runs on your Natively API key. Reranking counts toward your plan\u2019s Knowledge allowance.')
-                                        : t('Requires a Natively API key. Add one in the Natively API section to use the managed reranker.')}
+                                        ? t('Runs on your FREECLUELY API key. Reranking counts toward your plan\u2019s Knowledge allowance.')
+                                        : t('Requires a FREECLUELY API key. Add one in the FREECLUELY API section to use the managed reranker.')}
                                 </p>
                             </div>
                         )}
@@ -1723,7 +1723,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
 
                 <div className="flex items-center justify-between gap-3 flex-wrap text-[10px] aip-muted px-1">
                     <p className="min-w-0 flex-1">
-                        {t('Runs on this device with zero data sent externally. Built-in BGE model shipped with Natively, or download open models directly from Hugging Face.')}
+                        {t('Runs on this device with zero data sent externally. Built-in BGE model shipped with FREECLUELY, or download open models directly from Hugging Face.')}
                     </p>
                     <span className="shrink-0 font-medium tabular-nums aip-text">
                         {installedCount}/{totalCount} {t('installed')}
@@ -1819,7 +1819,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                         <section className="space-y-1.5">
                             <header className="flex items-baseline justify-between gap-3 px-1">
                                 <h5 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--aip-secondary)' }}>
-                                    {t('Bundled with Natively')}
+                                    {t('Bundled with FREECLUELY')}
                                 </h5>
                                 <span className="text-[10px] tabular-nums" style={{ color: 'var(--aip-tertiary)' }}>1/1</span>
                             </header>
@@ -2040,7 +2040,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
             {/* Provider Card 4: Community Extensions — High-End Minimalist Design */}
             <div className="aip-card aip-provider space-y-3">
                 <div className="aip-provider-head">
-                    <AipProviderMark provider="natively" name={t('Reranker Extensions')} />
+                    <AipProviderMark provider="freecluely" name={t('Reranker Extensions')} />
                     <h4 className="aip-card-title truncate min-w-0">{t('Reranker Extensions')}</h4>
                     <div className="ml-auto flex items-center gap-2 shrink-0">
                         {/* Opens the repository these are published from, so the
@@ -2070,7 +2070,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 </div>
 
                 <p className="text-[10px] aip-muted px-1">
-                    {t('An extension teaches Natively to use custom reranking models. Extensions run locally with full data privacy.')}
+                    {t('An extension teaches FREECLUELY to use custom reranking models. Extensions run locally with full data privacy.')}
                 </p>
 
                 {installError && (
@@ -2411,7 +2411,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
             <header className="space-y-1">
                 <h3 className="aip-title">{t('Reranker')}</h3>
                 <p className="aip-subtitle">
-                    {t('After Natively searches your documents, the reranker decides which passages actually answer the question. It is chosen separately from your embedding model and your AI model.')}
+                    {t('After FREECLUELY searches your documents, the reranker decides which passages actually answer the question. It is chosen separately from your embedding model and your AI model.')}
                 </p>
             </header>
             {hero}
@@ -2422,3 +2422,4 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
 };
 
 export default RerankerSettings;
+

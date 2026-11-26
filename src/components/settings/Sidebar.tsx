@@ -1,10 +1,9 @@
 import React from 'react';
-import { Monitor, Cpu, Info } from 'lucide-react';
-import { NativelyLogoMark } from '../NativelyLogoMark';
+import { Monitor, Cpu, Info, Zap } from 'lucide-react';
 
 interface SidebarProps {
-    activeTab: 'general' | 'natively-api' | 'ai-providers' | 'about';
-    setActiveTab: (tab: 'general' | 'natively-api' | 'ai-providers' | 'about') => void;
+    activeTab: 'general' | 'fc-api' | 'ai-providers' | 'about';
+    setActiveTab: (tab: 'general' | 'fc-api' | 'ai-providers' | 'about') => void;
     onClose: () => void;
 }
 
@@ -21,10 +20,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onClo
                         <Monitor size={16} /> General
                     </button>
                     <button
-                        onClick={() => setActiveTab('natively-api')}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${activeTab === 'natively-api' ? 'bg-bg-item-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-item-active/50'}`}
+                        onClick={() => setActiveTab('fc-api')}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${activeTab === 'fc-api' ? 'bg-bg-item-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-item-active/50'}`}
                     >
-                        <NativelyLogoMark size={16} className="text-blue-500" /> Natively API
+                        <Zap size={16} className="text-emerald-500" /> FREECLUELY API
                     </button>
                     <button
                         onClick={() => setActiveTab('ai-providers')}
@@ -32,7 +31,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onClo
                     >
                         <Cpu size={16} /> AI Providers
                     </button>
-                    {/* Add more tabs as needed */}
+                    <button
+                        onClick={() => setActiveTab('about')}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${activeTab === 'about' ? 'bg-bg-item-active text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-bg-item-active/50'}`}
+                    >
+                        <Info size={16} /> About
+                    </button>
                 </nav>
             </div>
 
