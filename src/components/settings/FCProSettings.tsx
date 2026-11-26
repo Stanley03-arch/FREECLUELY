@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useId, useCallback } from 
 import { useT } from '../../i18n';
 import { AnimatePresence, motion, useReducedMotion, type Variants, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import { CheckCircle, AlertCircle, X, ChevronDown, Check, ArrowUpRight } from 'lucide-react';
-import { TierBand } from './FREECLUELYApiSettings';
+import { TierBand } from './FCApiSettings';
 import { plansVisit } from '../../lib/funnel/plansVisit.mjs';
 import { usePlansSeen } from '../../lib/funnel/usePlansSeen';
 import './apiTier.css';
@@ -21,7 +21,7 @@ import { CHECKOUT_URLS } from '../../config/urls';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const EASE_OUT_CSS = 'cubic-bezier(0.23, 1, 0.32, 1)';
 
-// EASE_ENTER / EASE_LEAVE now live in ../../lib/plansMotion — FREECLUELYApiSettings
+// EASE_ENTER / EASE_LEAVE now live in ../../lib/plansMotion — FCApiSettings
 // needs the same pair, and one settings component importing motion constants
 // from a sibling settings component is the wrong dependency direction.
 
@@ -447,7 +447,7 @@ export const FCProSettings: React.FC<FCProSettingsProps> = ({
 
     // Surfaced under the Deactivate button — deactivation is the only action
     // this component still owns (license-key *entry* moved to the unified
-    // "FREECLUELY key" card in FREECLUELYApiSettings.tsx).
+    // "FREECLUELY key" card in FCApiSettings.tsx).
     const [errorMessage, setErrorMessage] = useState('');
     // Whether the Yearly/Lifetime grid is revealed. Only consulted when
     // `collapsePricing` is set; otherwise the grid is always shown.
@@ -1063,7 +1063,7 @@ export const FCProSettings: React.FC<FCProSettingsProps> = ({
                     </div>
 
                     {/* "Already purchased? Enter your license key" card intentionally
-                        removed — the FREECLUELY key card (FREECLUELYApiSettings.tsx,
+                        removed — the FREECLUELY key card (FCApiSettings.tsx,
                         rendered above this component in PlansSettings.tsx) accepts
                         either credential type in one box and routes by prefix, so a
                         second license-key input here is a redundant entry point. */}
@@ -1072,7 +1072,7 @@ export const FCProSettings: React.FC<FCProSettingsProps> = ({
 
             {/* Refund Policy — intentionally NOT duplicated here. It lives once,
                 covering both purchase types (24-hour API subscription window vs
-                1-hour Pro pre-activation window), in FREECLUELYApiSettings.tsx's
+                1-hour Pro pre-activation window), in FCApiSettings.tsx's
                 "How it works & refund policy" accordion, which renders above this
                 component in PlansSettings.tsx. */}
 
@@ -1084,4 +1084,5 @@ export const FCProSettings: React.FC<FCProSettingsProps> = ({
         </motion.div>
     );
 };
+
 

@@ -16,7 +16,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '../index.css';
-import { NativelyApiSettings } from '../components/settings/NativelyApiSettings';
+import { FCApiSettings } from '../components/settings/FCApiSettings';
 
 const params = new URLSearchParams(location.search);
 const CLAIMED = params.get('claimed') === '1';
@@ -126,9 +126,10 @@ function Harness() {
         background: LIGHT ? '#fafafa' : '#1E1E21',
       }}
     >
-      <NativelyApiSettings />
+      <FCApiSettings />
     </div>
   );
 }
 
 createRoot(document.getElementById('harness-root')!).render(<Harness />);
+

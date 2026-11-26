@@ -42,7 +42,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowLeft, ArrowUpRight, Check, ChevronRight, X } from 'lucide-react';
-import { PLANS } from '../settings/NativelyApiSettings';
+import { PLANS } from '../settings/FCApiSettings';
 import { CHECKOUT_URLS, PRICING_PAGE_URL } from '../../config/urls';
 import { YEARLY_LIST, YEARLY_SALE, YEARLY_PCT_OFF, yearlySaleLabel } from '../../lib/lifetimeSale.mjs';
 import { PRO_PACKS } from '../../lib/apiPlans.mjs';
@@ -255,7 +255,7 @@ interface Tier {
 
 function buildTiers(now: Date): Tier[] {
   const saleName = yearlySaleLabel(now)?.replace(/\s*[−-]\d+%$/, '') ?? null;
-  const apiPro = PLANS.find(x => x.planKey === 'pro')!;
+  const apiPro = PLANS.find((x: (typeof PLANS)[number]) => x.planKey === 'pro')!;
   const heavy = PRO_PACKS.find(p => p.id === 'pack_heavy')!;
   return [
     {
@@ -702,3 +702,4 @@ export function UnlockProPlans({
 }
 
 export default UnlockProPlans;
+

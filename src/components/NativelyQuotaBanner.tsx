@@ -26,7 +26,7 @@ const THRESHOLD_PCT    = 90;
 
 // Who sees this, and what it offers them (2026-11-07).
 //
-// It needs a SAVED Natively key (getFreecluelyUsage answers ok:false without one)
+// It needs a SAVED Natively key (getNativelyUsage answers ok:false without one)
 // and returns early for a trial, so it is only ever shown to a key holder:
 // a monthly or yearly subscriber, or someone on a one-time Pro pack.
 //
@@ -67,7 +67,7 @@ export const NativelyQuotaBanner: React.FC = () => {
             if (cancelled) return;
 
             try {
-                const result = await window.electronAPI?.getFreecluelyUsage?.();
+                const result = await window.electronAPI?.getNativelyUsage?.();
                 console.log('[NativelyQuotaBanner] usage:', JSON.stringify(result));
 
                 if (cancelled) return;
@@ -231,4 +231,5 @@ export const NativelyQuotaBanner: React.FC = () => {
         </GenieModal>
     );
 };
+
 

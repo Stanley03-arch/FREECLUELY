@@ -173,7 +173,7 @@ const ModelSelectorWindow = () => {
                 // Build the list
                 const models: ModelOption[] = [];
 
-                if (creds?.hasFreecluelyKey) {
+                if (creds?.hasNativelyKey) {
                     models.push({ id: 'natively', name: 'FREECLUELY API', type: 'cloud', provider: 'freecluely' });
                 }
 
@@ -600,4 +600,5 @@ const ModelSelectorWindow = () => {
 };
 
 export default ModelSelectorWindow;
+
 

@@ -115,7 +115,7 @@ interface RerankerStatus {
     openrouterModel: string | null;
     jinaModel: string | null;
     voyageModel?: string | null;
-    freecluelyModel: string | null;
+    nativelyModel: string | null;
     customModel: string | null;
     customEndpoint: string | null;
     hasCustomKey: boolean;
@@ -501,7 +501,7 @@ const INITIAL_STATUS: RerankerStatus = {
     provider: 'local',
     openrouterModel: null,
     jinaModel: null,
-    freecluelyModel: null,
+    nativelyModel: null,
     customModel: null,
     customEndpoint: null,
     hasCustomKey: false,
@@ -693,7 +693,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
             // provider out of THIS list is what makes its card vanish when
             // discovery degrades, and the managed reranker is the one a customer
             // can use without going and getting a second account.
-            id: 'freecluely', name: 'FREECLUELY',
+            id: 'natively', name: 'FREECLUELY',
             keyUrl: 'https://github.com/Stanley03-arch/FREECLUELY', keyPlaceholder: 'fc_sk_…',
             staticCatalogue: true, hasApiKey: false, models: [],
         }, {
@@ -773,7 +773,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
         switch (providerId) {
             case 'jina': return { provider: 'jina', jinaModel: model };
             case 'voyage': return { provider: 'voyage', voyageModel: model };
-            case 'freecluely': return { provider: 'freecluely', freecluelyModel: model };
+            case 'natively': return { provider: 'natively', nativelyModel: model };
             default: return { provider: 'openrouter', openrouterModel: model };
         }
     };
@@ -844,7 +844,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
 
     const activeOptionId = useMemo(() => {
         if (!status?.effective) return 'local::built-in';
-        if (status.effective.kind === 'freecluely'
+        if (status.effective.kind === 'natively'
             || status.effective.kind === 'openrouter'
             || status.effective.kind === 'jina'
             || status.effective.kind === 'voyage') {
@@ -876,12 +876,12 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
         setCatalogError(null);
         setCatalogListError(null);
         try {
-            if (kind === 'freecluely') {
+            if (kind === 'natively') {
                 // Its own arm, not the trailing `else`. Without one, picking the
                 // managed reranker fell through to the local branch and silently
                 // set provider:'local' — the picker would show a selection the
                 // app was not using.
-                await window.electronAPI.setRerankerConfig?.({ provider: 'freecluely', freecluelyModel: id });
+                await window.electronAPI.setRerankerConfig?.({ provider: 'natively', nativelyModel: id });
             } else if (kind === 'openrouter') {
                 await window.electronAPI.setRerankerConfig?.({ provider: 'openrouter', openrouterModel: id });
             } else if (kind === 'jina') {
@@ -919,7 +919,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
         if (!status) return '';
         const parts: string[] = [];
 
-        if (status.effective.kind === 'freecluely') {
+        if (status.effective.kind === 'natively') {
             // Says where the text goes, the question this option raises. The
             // billing half ("Uses your plan's Knowledge allowance") is NOT
             // repeated here — the Natively provider card below already states
@@ -1519,7 +1519,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 Natively gets no card (owner decision, 2026-09-22): the server
                 pins its model and the key comes from the Natively plan, so there
                 is nothing to configure. It stays selectable in Active Reranker. */}
-            {hostedProviders.filter(p => p.id !== 'freecluely').map(p => {
+            {hostedProviders.filter(p => p.id !== 'natively').map(p => {
                 const isActive = status.effective.kind === p.id;
                 const isSelected = status.provider === p.id;
                 // status.hasApiKey is the presence flag for the SELECTED
@@ -1529,8 +1529,8 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 const draft = keyDrafts[p.id] ?? '';
                 const saving = savingKeyFor === p.id;
                 const saved = savedKeyFor === p.id;
-                const selectedModel = p.id === 'freecluely'
-                    ? status.freecluelyModel
+                const selectedModel = p.id === 'natively'
+                    ? status.nativelyModel
                     : p.id === 'jina' ? status.jinaModel
                     : p.id === 'voyage' ? (status.voyageModel ?? null)
                     : status.openrouterModel;
@@ -1538,7 +1538,7 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
                 // this card must not offer a key field. Rendering one would
                 // invite a paste that reranker:set-hosted-key now refuses
                 // ('not_byok'), and a Remove button that would delete nothing.
-                const byok = p.id !== 'freecluely';
+                const byok = p.id !== 'natively';
                 // A live catalogue arrives from OpenRouter; a static one ships
                 // with the app and is listed even before a key exists, so the
                 // user can see what a key would buy them.
@@ -2422,4 +2422,5 @@ export const RerankerSettings: React.FC<RerankerSettingsProps> = ({ renderParts 
 };
 
 export default RerankerSettings;
+
 
