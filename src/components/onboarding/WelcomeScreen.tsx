@@ -19,8 +19,8 @@ import { useWelcomeTheme, useRise, LavenderButton } from './welcomeShared';
 import { fillText } from './i18nText';
 import { DEMO_VIDEO_URL, openDemoVideo } from '../../lib/demoVideo';
 
-const TERMS_URL = 'https://natively.software/termsandconditions';
-const PRIVACY_URL = 'https://natively.software/privacy';
+const TERMS_URL = 'https://github.com/Stanley03-arch/FREECLUELY';
+const PRIVACY_URL = 'https://github.com/Stanley03-arch/FREECLUELY';
 
 interface Props {
   onGetStarted: () => void;
@@ -89,3 +89,4 @@ export const WelcomeLeft: React.FC<Props> = ({ onGetStarted }) => {
     </div>
   );
 };
+
