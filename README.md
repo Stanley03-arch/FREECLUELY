@@ -49,6 +49,10 @@
 
 <small>Desktop installers: Windows 10/11 (`.exe`), macOS 12+ Apple Silicon & Intel (`.dmg` / `.zip`), Linux (`.AppImage` / `.deb`). Mobile: iOS & Android connect via built-in Phone Mirror.</small>
 
+<br/>
+
+<img src="assets/dashboard-preview.svg" alt="FREECLUELY Dashboard — dark obsidian UI with emerald accents, meeting list, and local AI controls" width="100%">
+
 </div>
 
 ---

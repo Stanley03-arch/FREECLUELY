@@ -917,7 +917,7 @@ function PlanRail({ children }: { children: React.ReactNode }) {
   }, [reduceMotion]);
 
   return (
-    <div ref={railRef} className="api-tier-rail" data-edge={edge} role="list" aria-label="Natively API plans">
+    <div ref={railRef} className="api-tier-rail" data-edge={edge} role="list" aria-label="FREECLUELY API plans">
       {children}
     </div>
   );
@@ -943,7 +943,7 @@ const DISSOLVE = {
 // like the plan card above: Light on the Max band, Heavy on the Ultra band.
 // The allowance is the product, so it gets the two rows; the rule that makes
 // a pack a pack (hours OR days, whichever first; Pro only while the AI and
-// transcription both run on Natively API, 2026-11-16) is said once, under both.
+// transcription both run on FREECLUELY API, 2026-11-16) is said once, under both.
 // The Pro rule: electron/services/packs/packProRule.ts.
 const PACK_LOOK: Record<string, { mesh: TierMesh; pattern: TierPattern; blurb: string }> = {
   pack_light: { mesh: 'max', pattern: 'dots', blurb: 'For an interview or two: a few hours of Pro, paid once.' },
@@ -998,8 +998,8 @@ function ProPacks({ currentPlan, onBuy, arrive, changeNote }: { currentPlan?: st
         Pay once, nothing renews. A pack ends when its hours or days run out. More packs add hours.
       </p>
       <p data-pack-provider-rule className="text-[11px] text-text-tertiary px-1 leading-snug">
-        Pro works only while AI and transcription both use Natively API. Switch either to another provider and Pro turns off;
-        the pack still covers the part on Natively API.
+        Pro works only while AI and transcription both use FREECLUELY API. Switch either to another provider and Pro turns off;
+        the pack still covers the part on FREECLUELY API.
       </p>
       {/* What buying a pack does to THIS key (natively-api lib/planChange.js). */}
       {changeNote && <p data-plan-change-note className="text-[11px] text-text-tertiary px-1 leading-snug">{changeNote}</p>}
@@ -1062,7 +1062,7 @@ function Price({ amount, period }: { amount: string; period: string }) {
 }
 
 // ─── Component ───────────────────────────────────────────────
-interface NativelyApiSettingsProps {
+interface FCApiSettingsProps {
   initialIsSaved?: boolean;
   /**
    * Rendered between the Natively key card and the plan chooser. A slot exists
@@ -1074,7 +1074,7 @@ interface NativelyApiSettingsProps {
   afterKeySection?: React.ReactNode;
 }
 
-export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initialIsSaved = false, afterKeySection }) => {
+export const FCApiSettings: React.FC<FCApiSettingsProps> = ({ initialIsSaved = false, afterKeySection }) => {
   const prefersReducedMotion = useReducedMotion();
   const t = useT();
   // `initialIsSaved` arrives ASYNCHRONOUSLY. SettingsOverlay seeds its own
@@ -1560,7 +1560,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
     if (reason === 'byok') window.electronAPI?.openSettingsTab?.('ai-providers');
   };
 
-  // Single box, two credential types. A Natively API key (`natively_sk_...`)
+  // Single box, two credential types. A FREECLUELY API key (`natively_sk_...`)
   // is saved via CredentialsManager and already auto-activates Pro server-side
   // when the plan qualifies (ipcHandlers.ts `set-natively-api-key`). Anything
   // else is treated as a Dodo/Gumroad Pro license key and goes through
@@ -1852,7 +1852,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
           shows the two Pro packs where the plans are. The title says which. */}
       <div className="flex items-center justify-between gap-3 px-1">
         <p className="grid text-[11px] font-medium text-text-tertiary uppercase tracking-[0.07em]">
-          {(['Natively API plans', 'Pro packs'] as const).map((label) => {
+          {(['FREECLUELY API plans', 'Pro packs'] as const).map((label) => {
             const on = (label === 'Pro packs') === packsView;
             return (
               <span
@@ -2055,7 +2055,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
     <div className="space-y-6 animated fadeIn" data-interface-theme={interfaceTheme}>
       {/* Page title intentionally omitted here — PlansSettings.tsx (the parent
           tab wrapper) already renders "Plans & Billing" as the section header.
-          A second "Natively API / Managed transcription, AI & search" title
+          A second "FREECLUELY API / Managed transcription, AI & search" title
           directly beneath it read as two stacked, near-duplicate headers.
           The "Connected"/plan-name badge that used to live here moved down
           into the "Natively key" card header, where it stays visible in
@@ -2208,7 +2208,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
                           request; the trial's meters still show them once
                           a trial is running. */}
                       <p className="text-[15px] font-medium text-text-primary tracking-[-0.01em]">
-                        Try the Natively API free for 30 minutes
+                        Try the FREECLUELY API free for 30 minutes
                       </p>
                     </div>
 
@@ -2340,7 +2340,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
             <div>
               <div className="flex items-baseline justify-between gap-3">
                 <p className="natively-key-sub min-w-0 text-[12px] leading-snug">
-                  Activate with a Natively API key or a Natively Pro license.
+                  Activate with a FREECLUELY API key or a Natively Pro license.
                 </p>
                 {!isSaved && (
                   <KeyResendLink ref={resendLinkRef} open={resendOpen} onToggle={() => setResendOpen((o) => !o)} />
@@ -2377,7 +2377,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
                 setError(null);
               }}
               onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-              placeholder="Natively API key or Natively Pro license"
+              placeholder="FREECLUELY API key or Natively Pro license"
               spellCheck={false}
               autoComplete="off"
               data-invalid={error ? 'true' : 'false'}
@@ -2524,7 +2524,7 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
         )}
       </AnimatePresence>
 
-      {/* ── Usage card — only for a Natively API key with a confirmed  ── */}
+      {/* ── Usage card — only for a FREECLUELY API key with a confirmed  ── */}
       {/* valid plan (usageData populated by a successful quota fetch). */}
       {/* isSaved alone isn't enough: a saved-but-invalid/inactive key   */}
       {/* has nothing usage-shaped to show, so the section stays hidden */}
@@ -2693,3 +2693,4 @@ export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initia
     </LayoutGroup>
   );
 };
+

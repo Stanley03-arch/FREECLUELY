@@ -1843,3 +1843,4 @@ function markHits(text: string, hits: Array<{ from: number; to: number; current:
 }
 
 export default NotesWindow;
+

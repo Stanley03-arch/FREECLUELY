@@ -1575,7 +1575,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   const [manualTranscript, setManualTranscript] = useState('');
   const manualTranscriptRef = useRef<string>('');
   const [showTranscript, setShowTranscript] = useState(() => {
-    const stored = localStorage.getItem('natively_interviewer_transcript');
+    const stored = localStorage.getItem('freecluely_interviewer_transcript');
     return stored !== 'false';
   });
   // Analytics State
@@ -1867,7 +1867,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   // Sync transcript setting
   useEffect(() => {
     const handleStorage = () => {
-      const stored = localStorage.getItem('natively_interviewer_transcript');
+      const stored = localStorage.getItem('freecluely_interviewer_transcript');
       setShowTranscript(stored !== 'false');
     };
     window.addEventListener('storage', handleStorage);
@@ -2310,7 +2310,7 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
   // every renderer must observe the same effective value the backend enforces.
   const [directAssistEnabled, setDirectAssistEnabled] = useState(false);
   const [hideChatHidesWidget, setHideChatHidesWidget] = useState(() => {
-    const stored = localStorage.getItem('natively_hideChatHidesWidget');
+    const stored = localStorage.getItem('freecluely_hideChatHidesWidget');
     return stored ? stored === 'true' : true;
   });
 
@@ -3024,8 +3024,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
 
   // Persist Settings
   useEffect(() => {
-    localStorage.setItem('natively_undetectable', String(isUndetectable));
-    localStorage.setItem('natively_hideChatHidesWidget', String(hideChatHidesWidget));
+    localStorage.setItem('freecluely_undetectable', String(isUndetectable));
+    localStorage.setItem('freecluely_hideChatHidesWidget', String(hideChatHidesWidget));
   }, [isUndetectable, hideChatHidesWidget]);
 
   // Mouse Passthrough State
@@ -12242,7 +12242,7 @@ Provide only the answer, nothing else.`;
                                   : t('Open macOS Screen Recording privacy settings')
                                 : warningAction.type === 'mic-privacy'
                                 ? t('Open Windows microphone privacy settings')
-                                : t('Open Natively audio settings')
+                                : t('Open FREECLUELY audio settings')
                             }
                           >
                             {deepLinkUrl
@@ -12394,7 +12394,7 @@ Provide only the answer, nothing else.`;
                   icon={<MonitorOff strokeWidth={2.2} />}
                   title={mirrorNotice === 'shown-while-mirrored' ? t('Your screen is mirrored') : t('Hidden while your screen was mirrored')}
                   message={mirrorNotice === 'shown-while-mirrored'
-                    ? `${t('Natively is showing on the other display too. To hide it, press')} ${(shortcuts.toggleVisibility ?? []).join(isMac ? '' : '+')}.`
+                    ? `${t('FREECLUELY is showing on the other display too. To hide it, press')} ${(shortcuts.toggleVisibility ?? []).join(isMac ? '' : '+')}.`
                     : t('A mirrored display shows everything on your screen, so Natively stayed off both. To keep it on your own screen while you present, extend your desktop instead.')}
                   onDismiss={() => setMirrorNotice(null)}
                   dismissLabel={t('Dismiss')}
@@ -13455,7 +13455,7 @@ Provide only the answer, nothing else.`;
                           // and rendered a lowercase "natively" — the one label a trial
                           // user sees for the whole trial. 'Natively API' is what the
                           // model picker and every settings row already call it.
-                          if (m === 'natively') return 'Natively API';
+                          if (m === 'natively') return 'FREECLUELY API';
                           // For everything else, prefer the authoritative
                           // displayName from `getCurrentLlmConfig` (handles
                           // custom-provider UUIDs and any future model aliases
@@ -13632,3 +13632,4 @@ Provide only the answer, nothing else.`;
 };
 
 export default NativelyInterface;
+

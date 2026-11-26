@@ -198,10 +198,10 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
             mountedOnceRef.current = true;
 
             // Track launch count for showing the "What's New" pill
-            const storedCount = localStorage.getItem('natively_launch_count_v2.7');
+            const storedCount = localStorage.getItem('freecluely_launch_count_v3.2');
             const currentCount = storedCount ? parseInt(storedCount, 10) : 0;
             const newCount = currentCount + 1;
-            localStorage.setItem('natively_launch_count_v2.7', newCount.toString());
+            localStorage.setItem('freecluely_launch_count_v3.2', newCount.toString());
             if (mounted) {
                 setLaunchCount(newCount);
             }
@@ -212,8 +212,8 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
 
             // Onboarding state — push to orchestrator. The orchestrator handles
             // sequencing and timing; Launcher no longer auto-shows popovers.
-            const hasSeenModesOnboarding = localStorage.getItem('natively_seen_modes_onboarding_v5');
-            const hasSeenProfileOnboarding = localStorage.getItem('natively_seen_profile_onboarding_v1');
+            const hasSeenModesOnboarding = localStorage.getItem('freecluely_seen_modes_onboarding_v1');
+            const hasSeenProfileOnboarding = localStorage.getItem('freecluely_seen_profile_onboarding_v1');
             setOrchestratorUserState({
                 seenModesOnboarding: hasSeenModesOnboarding === 'true',
                 seenProfileOnboarding: hasSeenProfileOnboarding === 'true',
@@ -722,7 +722,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                             data-testid="open-profile-intelligence"
                             onClick={() => {
                                 setShowProfileOnboarding(false);
-                                localStorage.setItem('natively_seen_profile_onboarding_v1', 'true');
+                                localStorage.setItem('freecluely_seen_profile_onboarding_v1', 'true');
                                 window.electronAPI?.onboardingSetFlag?.('seenProfileOnboarding', true).catch(() => {});
                                 onOpenProfile?.();
                             }}
@@ -775,7 +775,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                                     onClick={(e) => { 
                                                         e.stopPropagation(); 
                                                         setShowProfileOnboarding(false); 
-                                                        localStorage.setItem('natively_seen_profile_onboarding_v1', 'true'); 
+                                                        localStorage.setItem('freecluely_seen_profile_onboarding_v1', 'true'); 
                                                         window.electronAPI?.onboardingSetFlag?.('seenProfileOnboarding', true).catch(() => {});
                                                     }}
                                                     className={`text-[12px] font-medium px-3.5 py-[6px] rounded-full transition-all active:scale-95 ${
@@ -791,7 +791,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                                         e.stopPropagation();
                                                         onOpenProfile?.();
                                                         setShowProfileOnboarding(false);
-                                                        localStorage.setItem('natively_seen_profile_onboarding_v1', 'true');
+                                                        localStorage.setItem('freecluely_seen_profile_onboarding_v1', 'true');
                                                         window.electronAPI?.onboardingSetFlag?.('seenProfileOnboarding', true).catch(() => {});
                                                     }}
                                                     className={`text-[12px] font-medium px-4 py-[6px] rounded-full transition-all active:scale-95 shadow-sm ${
@@ -814,7 +814,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                             data-testid="open-modes-manager"
                             onClick={() => {
                                 setShowModesOnboarding(false);
-                                localStorage.setItem('natively_seen_modes_onboarding_v5', 'true');
+                                localStorage.setItem('freecluely_seen_modes_onboarding_v1', 'true');
                                 window.electronAPI?.onboardingSetFlag?.('seenModesOnboarding', true).catch(() => {});
                                 onOpenModes?.();
                             }}
@@ -878,7 +878,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                                     onClick={(e) => { 
                                                         e.stopPropagation(); 
                                                         setShowModesOnboarding(false); 
-                                                        localStorage.setItem('natively_seen_modes_onboarding_v5', 'true'); 
+                                                        localStorage.setItem('freecluely_seen_modes_onboarding_v1', 'true'); 
                                                         window.electronAPI?.onboardingSetFlag?.('seenModesOnboarding', true).catch(() => {});
                                                     }}
                                                     className={`text-[12px] font-medium px-3.5 py-[6px] rounded-full transition-all active:scale-95 ${
@@ -894,7 +894,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                                         e.stopPropagation();
                                                         onOpenModes?.();
                                                         setShowModesOnboarding(false); 
-                                                        localStorage.setItem('natively_seen_modes_onboarding_v5', 'true'); 
+                                                        localStorage.setItem('freecluely_seen_modes_onboarding_v1', 'true'); 
                                                         window.electronAPI?.onboardingSetFlag?.('seenModesOnboarding', true).catch(() => {});
                                                     }}
                                                     className={`text-[12px] font-medium px-4 py-[6px] rounded-full transition-all active:scale-95 shadow-sm ${
@@ -1140,7 +1140,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                                 } else {
                                                     emitOrchestratorEvent({ type: 'turn:done', surface: 'meeting' });
                                                     onStartMeeting();
-                                                    analytics.trackCommandExecuted('start_natively_cta');
+                                                    analytics.trackCommandExecuted('start_freecluely_cta');
                                                 }
                                             }}
                                             data-guide="start"
@@ -1380,8 +1380,8 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                             <span className="text-[11px] text-text-tertiary font-medium leading-none tracking-wide">
                                 {/* One short line, as "Synced with calendar": the toast keeps the
                                     size of the app's other corner toasts (340px at most). */}
-                                {notification === 'shown-while-mirrored' ? `${(shortcuts.toggleVisibility ?? []).join(isMac ? '' : '+')} ${t('hides Natively')}`
-                                    : notification === 'shown-after-mirror' ? t('Natively was hidden')
+                                {notification === 'shown-while-mirrored' ? `${(shortcuts.toggleVisibility ?? []).join(isMac ? '' : '+')} ${t('hides FREECLUELY')}`
+                                    : notification === 'shown-after-mirror' ? t('FREECLUELY was hidden')
                                     : t('Synced with calendar')}
                             </span>
                         </div>
@@ -1407,3 +1407,4 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
 };
 
 export default Launcher;
+

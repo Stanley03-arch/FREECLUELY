@@ -26,7 +26,7 @@ const THRESHOLD_PCT    = 90;
 
 // Who sees this, and what it offers them (2026-11-07).
 //
-// It needs a SAVED Natively key (getNativelyUsage answers ok:false without one)
+// It needs a SAVED Natively key (getFreecluelyUsage answers ok:false without one)
 // and returns early for a trial, so it is only ever shown to a key holder:
 // a monthly or yearly subscriber, or someone on a one-time Pro pack.
 //
@@ -67,7 +67,7 @@ export const NativelyQuotaBanner: React.FC = () => {
             if (cancelled) return;
 
             try {
-                const result = await window.electronAPI?.getNativelyUsage?.();
+                const result = await window.electronAPI?.getFreecluelyUsage?.();
                 console.log('[NativelyQuotaBanner] usage:', JSON.stringify(result));
 
                 if (cancelled) return;
@@ -182,7 +182,7 @@ export const NativelyQuotaBanner: React.FC = () => {
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                     <AlertTriangle size={14} className={`${amber} shrink-0`} strokeWidth={2} />
-                    <span className="text-[13px] font-semibold text-text-primary">{packEnded ? 'Your pack has ended' : 'Natively quota almost full'}</span>
+                    <span className="text-[13px] font-semibold text-text-primary">{packEnded ? 'Your pack has ended' : 'FREECLUELY quota almost full'}</span>
                 </div>
                 <button
                     onClick={() => setVisible(false)}
@@ -231,3 +231,4 @@ export const NativelyQuotaBanner: React.FC = () => {
         </GenieModal>
     );
 };
+

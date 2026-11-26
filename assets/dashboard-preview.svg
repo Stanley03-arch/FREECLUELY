@@ -1,0 +1,88 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0B0F14"/>
+      <stop offset="100%" stop-color="#0F141B"/>
+    </linearGradient>
+    <linearGradient id="card1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#064E3B"/>
+      <stop offset="100%" stop-color="#065F46"/>
+    </linearGradient>
+    <linearGradient id="card2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1B2431"/>
+      <stop offset="100%" stop-color="#222D3D"/>
+    </linearGradient>
+    <linearGradient id="btn" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <!-- Main window -->
+  <rect width="1280" height="800" fill="url(#bg)"/>
+  <!-- Window frame -->
+  <rect x="40" y="30" width="1200" height="740" rx="12" fill="#0F141B" filter="url(#shadow)" stroke="#1B2431" stroke-width="1"/>
+  <!-- Title bar -->
+  <rect x="40" y="30" width="1200" height="44" rx="12" fill="#151C26"/>
+  <rect x="40" y="56" width="1200" height="18" fill="#151C26"/>
+  <!-- Traffic lights -->
+  <circle cx="72" cy="52" r="7" fill="#FF5F57"/>
+  <circle cx="96" cy="52" r="7" fill="#FEBC2E"/>
+  <circle cx="120" cy="52" r="7" fill="#28C840"/>
+  <!-- Search bar -->
+  <rect x="460" y="38" width="360" height="28" rx="14" fill="#1B2431" stroke="#243041" stroke-width="1"/>
+  <text x="600" y="57" font-family="system-ui, sans-serif" font-size="13" fill="#4B5563" text-anchor="middle">Search or ask anything...</text>
+  <!-- Settings icon -->
+  <circle cx="1198" cy="52" r="10" fill="#1B2431" stroke="#243041" stroke-width="1"/>
+  <text x="1198" y="57" font-family="system-ui, sans-serif" font-size="14" fill="#6B7280" text-anchor="middle">⚙</text>
+  <!-- Content area header -->
+  <text x="80" y="120" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#F9FAFB" letter-spacing="-0.5">My FREECLUELY</text>
+  <!-- Detectable toggle -->
+  <rect x="230" y="104" width="80" height="22" rx="11" fill="#1B2431" stroke="#243041" stroke-width="1"/>
+  <circle cx="258" cy="115" r="9" fill="#374151"/>
+  <text x="273" y="119" font-family="system-ui, sans-serif" font-size="11" fill="#6B7280">Detectable</text>
+  <!-- Start button -->
+  <rect x="1050" y="100" width="168" height="36" rx="18" fill="url(#btn)"/>
+  <text x="1134" y="123" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="white" text-anchor="middle">✦ Start FREECLUELY</text>
+  <!-- Feature card 1 - Local AI -->
+  <rect x="80" y="150" width="560" height="160" rx="12" fill="url(#card1)" stroke="#059669" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="310" y="210" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#ECFDF5" text-anchor="middle">Local AI · Private by Default</text>
+  <text x="310" y="238" font-family="system-ui, sans-serif" font-size="13" fill="#6EE7B7" text-anchor="middle">No API key needed · Runs on-device with Ollama</text>
+  <text x="310" y="262" font-family="system-ui, sans-serif" font-size="12" fill="#A7F3D0" text-anchor="middle">Free models: Llama 3.2 · Qwen 2.5 · DeepSeek R1</text>
+  <rect x="230" y="278" width="160" height="16" rx="8" fill="#059669"/>
+  <text x="310" y="290" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="white" text-anchor="middle">Install Free Model →</text>
+  <!-- Feature card 2 - Calendar -->
+  <rect x="660" y="150" width="560" height="160" rx="12" fill="url(#card2)" stroke="#243041" stroke-width="1"/>
+  <text x="940" y="210" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#F9FAFB" text-anchor="middle">Link your calendar</text>
+  <text x="940" y="238" font-family="system-ui, sans-serif" font-size="13" fill="#9CA3AF" text-anchor="middle">See upcoming events and get AI meeting prep</text>
+  <rect x="860" y="260" width="160" height="30" rx="6" fill="#1B2431" stroke="#10B981" stroke-width="1"/>
+  <text x="940" y="280" font-family="system-ui, sans-serif" font-size="13" fill="#10B981" text-anchor="middle">Connect calendar →</text>
+  <!-- Section: Today -->
+  <text x="80" y="346" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#6B7280" letter-spacing="0.05em">TODAY</text>
+  <!-- Meeting rows -->
+  <rect x="80" y="358" width="1140" height="52" rx="8" fill="#151C26"/>
+  <rect x="80" y="358" width="4" height="52" rx="2" fill="#10B981"/>
+  <text x="102" y="380" font-family="system-ui, sans-serif" font-size="14" font-weight="500" fill="#F9FAFB">Meeting Agenda Review Session</text>
+  <text x="102" y="399" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">AI-generated notes ready · 00:42</text>
+  <text x="1190" y="389" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280" text-anchor="end">11:07 am</text>
+  <rect x="80" y="416" width="1140" height="52" rx="8" fill="#151C26"/>
+  <text x="102" y="438" font-family="system-ui, sans-serif" font-size="14" font-weight="500" fill="#F9FAFB">Interview Prep Session</text>
+  <text x="102" y="457" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">Overlay answers · Local Llama 3.2 · 00:28</text>
+  <text x="1190" y="447" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280" text-anchor="end">10:50 am</text>
+  <rect x="80" y="474" width="1140" height="52" rx="8" fill="#151C26"/>
+  <text x="102" y="496" font-family="system-ui, sans-serif" font-size="14" font-weight="500" fill="#F9FAFB">Project Kickoff Call</text>
+  <text x="102" y="515" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">Summary + action items · GPT-4o · 00:35</text>
+  <text x="1190" y="505" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280" text-anchor="end">10:38 am</text>
+  <!-- Section: Yesterday -->
+  <text x="80" y="560" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#6B7280" letter-spacing="0.05em">YESTERDAY</text>
+  <rect x="80" y="572" width="1140" height="52" rx="8" fill="#151C26"/>
+  <text x="102" y="594" font-family="system-ui, sans-serif" font-size="14" font-weight="500" fill="#F9FAFB">Coding a Book Class</text>
+  <text x="102" y="613" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">DeepSeek R1 local · 00:51</text>
+  <text x="1190" y="603" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280" text-anchor="end">11:43 pm</text>
+  <rect x="80" y="630" width="1140" height="52" rx="8" fill="#151C26"/>
+  <text x="102" y="652" font-family="system-ui, sans-serif" font-size="14" font-weight="500" fill="#F9FAFB">Ensuring Visibility and Clear Sight</text>
+  <text x="102" y="671" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280">Qwen 2.5 local · 00:30</text>
+  <text x="1190" y="661" font-family="system-ui, sans-serif" font-size="12" fill="#6B7280" text-anchor="end">11:37 pm</text>
+</svg>

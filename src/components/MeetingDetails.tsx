@@ -969,7 +969,7 @@ const NotesActions: React.FC<{
                             onClick={onRegenerateAsSuggested}
                             disabled={isRegenerating || suggestion.needsPro}
                         >
-                            {suggestion.needsPro ? `${suggestion.name} ${t('notes need Natively Pro')}` : `${t('Regenerate notes as')} ${suggestion.name}`}
+                            {suggestion.needsPro ? `${suggestion.name} ${t('notes need FREECLUELY Pro')}` : `${t('Regenerate notes as')} ${suggestion.name}`}
                         </LiquidGlassButton>
                     </motion.div>
                 )}
@@ -3426,7 +3426,7 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
                                         })()}
                                         {gatedTemplateName && (
                                             <p className="w-full flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-text-secondary">
-                                                <span>{`${gatedTemplateName} ${t('notes need Natively Pro')}`}</span>
+                                                <span>{`${gatedTemplateName} ${t('notes need FREECLUELY Pro')}`}</span>
                                                 <button
                                                     type="button"
                                                     onClick={() => { void window.electronAPI?.openSettingsTab?.('plans'); }}
@@ -4520,3 +4520,4 @@ ${meeting.detailedSummary.keyPoints?.map(item => `- ${item}`).join('\n') || 'Non
 };
 
 export default MeetingDetails;
+

@@ -54,7 +54,7 @@ const FEATURES: FeatureSlide[] = [
     // promise: the affiliate page shows no rate, so neither does this card.
     {
         id: 'program_creators',
-        headline: 'Post about Natively',
+        headline: 'Post about FREECLUELY',
         subtitle: 'Get a month of Ultra, free',
         bullets: [
             'A public post in your own words',
@@ -66,7 +66,7 @@ const FEATURES: FeatureSlide[] = [
     },
     {
         id: 'program_affiliate',
-        headline: 'Earn with Natively',
+        headline: 'Earn with FREECLUELY',
         subtitle: 'Share what you use, earn when they buy',
         bullets: [
             'A commission on every sale you refer',
@@ -78,7 +78,7 @@ const FEATURES: FeatureSlide[] = [
     },
 
     {
-        id: 'support_natively',
+        id: 'support_freecluely',
         headline: 'Support development',
         subtitle: 'Built openly and sustained by users',
         bullets: [
@@ -91,8 +91,8 @@ const FEATURES: FeatureSlide[] = [
         url: 'https://buymeacoffee.com/evinjohnn'
     },
     {
-        id: 'advertise_natively',
-        headline: 'Advertise with Natively',
+        id: 'advertise_freecluely',
+        headline: 'Advertise with FREECLUELY',
         subtitle: 'Sponsorship and ad slots are open',
         bullets: [SPONSORSHIP_EMAIL],
         type: 'advertise',
@@ -174,7 +174,7 @@ export const FeatureSpotlight: React.FC = () => {
     // Interest state: map of feature ID -> boolean
     const [interestState, setInterestState] = useState<Record<string, boolean>>(() => {
         try {
-            const saved = localStorage.getItem('natively_feature_interest');
+            const saved = localStorage.getItem('freecluely_feature_interest');
             return saved ? JSON.parse(saved) : {};
         } catch (e) {
             return {};
@@ -252,7 +252,7 @@ export const FeatureSpotlight: React.FC = () => {
 
         const newState = { ...interestState, [currentFeature.id]: !isInterested };
         setInterestState(newState);
-        localStorage.setItem('natively_feature_interest', JSON.stringify(newState));
+        localStorage.setItem('freecluely_feature_interest', JSON.stringify(newState));
 
         // Interaction triggers "Anonymous one-time ping"
         if (!isInterested) {
@@ -541,3 +541,4 @@ export const FeatureSpotlight: React.FC = () => {
         </div >
     );
 };
+

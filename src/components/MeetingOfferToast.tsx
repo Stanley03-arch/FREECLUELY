@@ -118,7 +118,7 @@ export const MeetingOfferToast: React.FC = () => {
                                 color: ink.strong, whiteSpace: 'nowrap', outline: 'none',
                             }}
                         >
-                            {secondsLeft !== null ? t('Start now') : t('Start Natively')}<ArrowRight size={13} strokeWidth={2} aria-hidden />
+                            {secondsLeft !== null ? t('Start now') : t('Start FREECLUELY')}<ArrowRight size={13} strokeWidth={2} aria-hidden />
                         </button>
                         <QuietButton ink={ink} onClick={notNow}>{t('Not now')}</QuietButton>
                     </div>

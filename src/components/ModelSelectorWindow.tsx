@@ -40,7 +40,7 @@ const ModelSelectorWindow = () => {
     // What the overlay paints for that pick (Default is Lavender).
     const interfaceTheme = resolveMeetingInterfaceTheme(chosenInterfaceTheme, isLight ? 'light' : 'dark');
     const [overlayOpacity, setOverlayOpacity] = useState<number>(() => {
-        const stored = localStorage.getItem('natively_overlay_opacity');
+        const stored = localStorage.getItem('freecluely_overlay_opacity');
         const parsed = stored ? parseFloat(stored) : NaN;
         const isUserSet = Number.isFinite(parsed) && parsed !== OVERLAY_OPACITY_DEFAULT;
         return isUserSet ? clampOverlayOpacity(parsed) : getDefaultOverlayOpacity();
@@ -173,8 +173,8 @@ const ModelSelectorWindow = () => {
                 // Build the list
                 const models: ModelOption[] = [];
 
-                if (creds?.hasNativelyKey) {
-                    models.push({ id: 'natively', name: 'Natively API', type: 'cloud', provider: 'natively' });
+                if (creds?.hasFreecluelyKey) {
+                    models.push({ id: 'natively', name: 'FREECLUELY API', type: 'cloud', provider: 'freecluely' });
                 }
 
                 // Cloud Models — standard models + unique preferred models
@@ -600,3 +600,4 @@ const ModelSelectorWindow = () => {
 };
 
 export default ModelSelectorWindow;
+

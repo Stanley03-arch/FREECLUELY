@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useId, useCallback } from 
 import { useT } from '../../i18n';
 import { AnimatePresence, motion, useReducedMotion, type Variants, useMotionValue, useTransform, useSpring } from 'framer-motion';
 import { CheckCircle, AlertCircle, X, ChevronDown, Check, ArrowUpRight } from 'lucide-react';
-import { TierBand } from './NativelyApiSettings';
+import { TierBand } from './FREECLUELYApiSettings';
 import { plansVisit } from '../../lib/funnel/plansVisit.mjs';
 import { usePlansSeen } from '../../lib/funnel/usePlansSeen';
 import './apiTier.css';
@@ -21,7 +21,7 @@ import { CHECKOUT_URLS } from '../../config/urls';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const EASE_OUT_CSS = 'cubic-bezier(0.23, 1, 0.32, 1)';
 
-// EASE_ENTER / EASE_LEAVE now live in ../../lib/plansMotion — NativelyApiSettings
+// EASE_ENTER / EASE_LEAVE now live in ../../lib/plansMotion — FREECLUELYApiSettings
 // needs the same pair, and one settings component importing motion constants
 // from a sibling settings component is the wrong dependency direction.
 
@@ -34,13 +34,13 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
     );
 }
 
-// InteractiveCard now lives in ../ui/InteractiveCard so the Natively API
+// InteractiveCard now lives in ../ui/InteractiveCard so the FREECLUELY API
 // tier card can share the exact same hover (cursor-tracked spotlight +
 // press-scale), instead of a CSS-only imitation of it.
 
 // ─── Pro poster: ONE overlay drawing, TWO scenes ───────────────────────────
 //
-// WHAT IS ON THE CARDS. Both cards draw the Natively overlay doing the only
+// WHAT IS ON THE CARDS. Both cards draw the FREECLUELY overlay doing the only
 // thing the app does: hearing a question and answering it live, on top of
 // whatever is already on screen. A dim plate behind (the call or the doc you
 // are actually in), the overlay panel in front of it, a level meter (it is
@@ -375,7 +375,7 @@ function ProOverlayPoster({
     );
 }
 
-interface NativelyProSettingsProps {
+interface FCProSettingsProps {
     initialIsPremium?: boolean | null;
     /**
      * When true (the caller's user is not already Pro), the Yearly/Lifetime
@@ -420,7 +420,7 @@ interface NativelyProSettingsProps {
     onDeactivatePhase?: (phase: 'idle' | 'pending' | 'exiting') => void;
 }
 
-export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
+export const FCProSettings: React.FC<FCProSettingsProps> = ({
     initialIsPremium = null,
     // collapsePricing is still accepted but no longer used: the two Pro
     // cards always show (2026-11-09).
@@ -447,7 +447,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
 
     // Surfaced under the Deactivate button — deactivation is the only action
     // this component still owns (license-key *entry* moved to the unified
-    // "Natively key" card in NativelyApiSettings.tsx).
+    // "FREECLUELY key" card in FREECLUELYApiSettings.tsx).
     const [errorMessage, setErrorMessage] = useState('');
     // Whether the Yearly/Lifetime grid is revealed. Only consulted when
     // `collapsePricing` is set; otherwise the grid is always shown.
@@ -465,15 +465,15 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
     const [isPremium, setIsPremium] = useState<boolean | null>(
         initialIsPremium ?? getLicenseSnapshot()?.isPremium ?? null,
     );
-    // Distinguishes a Pro entitlement bundled with a Natively API plan
-    // ('natively_api' — server-validated per request, stored with hwid: '',
+    // Distinguishes a Pro entitlement bundled with a FREECLUELY API plan
+    // ('FREECLUELY_api' — server-validated per request, stored with hwid: '',
     // not device-slot-limited) from a standalone device license
     // ('dodo'/'gumroad' — HWID-bound, where deactivating frees a real
     // activation slot). The deactivate caption below is only true for the
     // latter. Undefined (unknown / still loading) deliberately falls through
     // to the device-license wording rather than under-warning.
     const [licenseProvider, setLicenseProvider] = useState<string | undefined>(getLicenseSnapshot()?.provider);
-    // A Pro pack whose AI or speech-to-text is off Natively API: its Pro is
+    // A Pro pack whose AI or speech-to-text is off FREECLUELY API: its Pro is
     // paused, not missing (electron/services/packs/packProRule.ts).
     const [packProPaused, setPackProPaused] = useState<string | null>(null);
 
@@ -645,8 +645,8 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
     // Funnel (plans_visit): the Pro cards were on screen during this visit.
     const proSeenRef = usePlansSeen(() => plansVisit.seen('pro'));
     // Literals, because they always were. These sat behind a
-    // getNativelyPricing fetch whose /v1/pricing route exists in no version of
-    // natively-api — added 2026-05-29 in a commit named "partial" and never
+    // getFREECLUELYPricing fetch whose /v1/pricing route exists in no version of
+    // FREECLUELY-api — added 2026-05-29 in a commit named "partial" and never
     // finished on the server — so the `||` right side won every render for
     // three months. Both links verified live on 2026-09-08. Changing a price
     // or a checkout link is an app release; that was already the case.
@@ -766,7 +766,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
         return <div className="p-8 flex justify-center"><div className="w-5 h-5 border-2 border-white/40 border-t-transparent rounded-full animate-spin" /></div>;
     }
 
-    // Pro that came bundled with a Natively API plan: render nothing at all.
+    // Pro that came bundled with a FREECLUELY API plan: render nothing at all.
     //
     // This whole section is the APP-ONLY licence, i.e. the alternative to
     // subscribing. Someone already on an API plan has Pro through it, so the
@@ -785,7 +785,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
     // standalone-licence branch, which is the safe direction: showing a
     // deactivate control to someone who might need it beats hiding one from an
     // owner who does.
-    if (isPremium && licenseProvider === 'natively_api') {
+    if (isPremium && licenseProvider === 'FREECLUELY_api') {
         return null;
     }
 
@@ -794,7 +794,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
     if (packProPaused) {
         return (
             <p data-pack-pro-paused={packProPaused} className="text-[12px] text-text-secondary px-1 leading-snug">
-                {t('Your pack includes Natively Pro, paused while AI or transcription uses another provider. Switch both back to Natively API to turn Pro on again.')}
+                {t('Your pack includes FREECLUELY Pro, paused while AI or transcription uses another provider. Switch both back to FREECLUELY API to turn Pro on again.')}
             </p>
         );
     }
@@ -917,7 +917,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
                             </p>
                         </div>
                         {/* Jelly clay, the same construction as the Activate CTA on
-                            the Natively key plaque. Neutral at rest because a
+                            the FREECLUELY key plaque. Neutral at rest because a
                             destructive control should not outrank the state it is
                             attached to; the danger colour arrives as a full fill on
                             hover, once the pointer is committed. Paint lives in
@@ -983,16 +983,16 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
                     animate="visible"
                     className="space-y-4"
                 >
-                    {/* ── Natively Pro on its own: two cards ──────────────────
+                    {/* ── FREECLUELY Pro on its own: two cards ──────────────────
                         Drawn like the API plans and the Pro packs above (website
                         tier cards), so the whole tab reads as one set. The old
                         teaser plaque, its show/hide accordion and the card art
                         were removed at the owner's request (2026-11-09). The
                         struck list price still appears only while a named sale
                         runs (lib/lifetimeSale.mjs). */}
-                    <div className="pt-3" id="natively-pro-pricing" ref={proSeenRef}>
+                    <div className="pt-3" id="FREECLUELY-pro-pricing" ref={proSeenRef}>
                         <div className="flex items-baseline justify-between gap-3 px-1 mb-2">
-                            <p className="text-[11px] font-medium text-text-tertiary uppercase tracking-[0.07em]">Natively Pro</p>
+                            <p className="text-[11px] font-medium text-text-tertiary uppercase tracking-[0.07em]">FREECLUELY Pro</p>
                             <span className="text-[11px] text-text-tertiary whitespace-nowrap">Use your own AI keys</span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -1063,7 +1063,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
                     </div>
 
                     {/* "Already purchased? Enter your license key" card intentionally
-                        removed — the Natively key card (NativelyApiSettings.tsx,
+                        removed — the FREECLUELY key card (FREECLUELYApiSettings.tsx,
                         rendered above this component in PlansSettings.tsx) accepts
                         either credential type in one box and routes by prefix, so a
                         second license-key input here is a redundant entry point. */}
@@ -1072,7 +1072,7 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
 
             {/* Refund Policy — intentionally NOT duplicated here. It lives once,
                 covering both purchase types (24-hour API subscription window vs
-                1-hour Pro pre-activation window), in NativelyApiSettings.tsx's
+                1-hour Pro pre-activation window), in FREECLUELYApiSettings.tsx's
                 "How it works & refund policy" accordion, which renders above this
                 component in PlansSettings.tsx. */}
 
@@ -1080,7 +1080,8 @@ export const NativelyProSettings: React.FC<NativelyProSettingsProps> = ({
                 Removed at the product owner's request — it was a 64-char hash
                 shown to every user, and nothing in the current UI asks them to
                 supply it (license activation happens through the unified
-                "Natively key" box, which needs no device identifier). */}
+                "FREECLUELY key" box, which needs no device identifier). */}
         </motion.div>
     );
 };
+

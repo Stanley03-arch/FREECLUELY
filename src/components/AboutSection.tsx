@@ -85,8 +85,8 @@ interface AboutItem { title: string; body: string; badge?: string; Icon: AboutIc
 // moves AI, speech and search to Natively API (PR #767, pack-switch-to-natively).
 // Answer length, the speech-model row and "Packs keep working" moved out to keep five.
 const WHATS_NEW: AboutItem[] = [
-    { title: 'Send a diagnostic report', body: 'If Natively cannot reach its servers, Natively API settings can send a report with a masked log.', Icon: Bug },
-    { title: 'One Natively key', body: 'A pack or plan key runs AI, speech and search on Natively API. Clearing it puts your settings back.', Icon: HandCoins },
+    { title: 'Send a diagnostic report', body: 'If FREECLUELY cannot reach its servers, API settings can send a report with a masked log.', Icon: Bug },
+    { title: 'One FREECLUELY key', body: 'A pack or plan key runs AI, speech and search on FREECLUELY API. Clearing it puts your settings back.', Icon: HandCoins },
     { title: 'Smarter Auto Answer', body: 'An on-device model decides which questions to answer. In Intelligence.', Icon: AutoAnswerIcon },
     { title: 'Faster screenshot answers', body: 'Answers start about twice as fast, and you choose the question. In Overlay.', Icon: Camera },
     { title: 'Answers on your phone', body: 'Every overlay answer streams live to your paired phone.', Icon: Smartphone },
@@ -104,8 +104,8 @@ const HOW_IT_WORKS: AboutItem[] = [
 // The last "How it works" row points at Setup & Help. It promises a recording
 // only where Setup & Help shows one (helpContent.mjs `clips.answer`: macOS);
 // elsewhere Setup & Help opens on the answer-flow figure and its guides.
-const SEE_IT_RECORDING: AboutItem = { title: 'See it in action', body: 'A recording of Natively answering a question.', Icon: PlayCircle, go: { tab: 'help', label: 'Setup & Help' } };
-const SEE_IT_GUIDES: AboutItem = { title: 'Setup and guides', body: 'Every part of Natively, step by step.', Icon: PlayCircle, go: { tab: 'help', label: 'Setup & Help' } };
+const SEE_IT_RECORDING: AboutItem = { title: 'See it in action', body: 'A recording of FREECLUELY answering a question.', Icon: PlayCircle, go: { tab: 'help', label: 'Setup & Help' } };
+const SEE_IT_GUIDES: AboutItem = { title: 'Setup and guides', body: 'Every part of FREECLUELY, step by step.', Icon: PlayCircle, go: { tab: 'help', label: 'Setup & Help' } };
 
 function helpShowsRecording(): boolean {
     const platform = isMac ? 'darwin' : isWindows ? 'win32' : null;
@@ -118,11 +118,9 @@ const PRIVACY: AboutItem[] = [
     { title: 'Keys are encrypted', body: "In your OS secure storage.", Icon: Lock },
 ];
 
-const REPO_URL = 'https://github.com/Natively-AI-assistant/natively-cluely-ai-assistant';
-const DONATE_URL = 'https://buymeacoffee.com/evinjohnn';
-// The website's affiliate page (natively-website src/pages/programs/Affiliate.tsx).
-// Its join button goes to the affiliate portal (natively.affonso.io).
-const AFFILIATE_URL = 'https://heynatively.com/affiliate';
+const REPO_URL = 'https://github.com/Stanley03-arch/FREECLUELY';
+const DONATE_URL = 'https://github.com/Stanley03-arch/FREECLUELY';
+const AFFILIATE_URL = 'https://github.com/Stanley03-arch/FREECLUELY';
 
 const CREATOR_LINKS = [
     { label: 'GitHub', url: REPO_URL, Icon: Github },
@@ -349,13 +347,13 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onNavigate, onOpenMo
     // follow, then report, then write, then pay — so the order reads as
     // intentional rather than as a sort. Re-measure if a label changes.
     const actions = [
-        { title: t('Star on GitHub'), body: t('Love Natively? Support us by starring the repo.'), action: actionButton(t('Star'), REPO_URL, Star, 'group-hover:text-[#E3B341]') },
-        { title: t('Telegram'), body: t('Early betas, direct help from the community, and usage tips.'), action: actionButton(t('Join'), 'https://t.me/nativelyaichat', Send, 'group-hover:text-sky-500') },
-        { title: t('LinkedIn'), body: t('Follow the climb to the top of AI note-taking assistants.'), action: actionButton(t('Follow'), 'https://www.linkedin.com/company/nativley-ai', Linkedin, 'group-hover:text-sky-600') },
+        { title: t('Star on GitHub'), body: t('Love FREECLUELY? Support us by starring the repo.'), action: actionButton(t('Star'), REPO_URL, Star, 'group-hover:text-[#E3B341]') },
+        { title: t('GitHub Discussions'), body: t('Early betas, direct help from the community, and usage tips.'), action: actionButton(t('Join'), `${REPO_URL}/discussions`, Send, 'group-hover:text-sky-500') },
+        { title: t('GitHub'), body: t('Follow the development of the most powerful free AI assistant.'), action: actionButton(t('Follow'), REPO_URL, Linkedin, 'group-hover:text-sky-600') },
         { title: t('Report an Issue'), body: t('Found a bug? Let us know so we can fix it.'), action: actionButton(t('Report'), `${REPO_URL}/issues`, Bug, 'group-hover:text-red-500', false) },
-        { title: t('Affiliate Program'), body: t('Recommend Natively and earn a commission on every sale.'), action: actionButton(t('Affiliate'), AFFILIATE_URL, HandCoins, 'group-hover:text-emerald-500', false) },
-        { title: t('Get in Touch'), body: t('Open for professional collaborations and job offers.'), action: actionButton(t('Contact Me'), 'mailto:evin@heynatively.com', Mail, 'group-hover:text-accent-primary', false) },
-        { title: t('Support Development'), body: t('Natively is independent source-available software.'), action: actionButton(t('Support Project'), DONATE_URL, Heart, 'group-hover:text-pink-500') },
+        { title: t('Contribute'), body: t('Help make FREECLUELY even more powerful. PRs welcome.'), action: actionButton(t('Contribute'), `${REPO_URL}/pulls`, HandCoins, 'group-hover:text-emerald-500', false) },
+        { title: t('Get in Touch'), body: t('Open for professional collaborations and feedback.'), action: actionButton(t('Contact'), `${REPO_URL}/issues/new`, Mail, 'group-hover:text-accent-primary', false) },
+        { title: t('Support Development'), body: t('FREECLUELY is free, open-source software. Star us on GitHub!'), action: actionButton(t('Support Project'), DONATE_URL, Heart, 'group-hover:text-pink-500') },
     ];
 
     // A row's glyph (neutral, the tile's own colour), and the button that takes
@@ -394,7 +392,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onNavigate, onOpenMo
                     className={isMac ? 'w-[88px] h-[88px]' : 'w-[76px] h-[76px] my-1.5'}
                     draggable={false}
                 />
-                <h2 className="mt-2 text-[22px] leading-7 font-bold tracking-[-0.02em] text-text-primary">Natively</h2>
+                <h2 className="mt-2 text-[22px] leading-7 font-bold tracking-[-0.02em] text-text-primary">FREECLUELY</h2>
                 <div className="mt-0.5 text-xs text-text-secondary tabular-nums select-text">{versionLine}</div>
             </header>
 
@@ -423,7 +421,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onNavigate, onOpenMo
 
             <section>
                 <SettingsSectionHeading
-                    title={t('How Natively Works')}
+                    title={t('How FREECLUELY Works')}
                     subtitle={t('From the conversation to the answer.')}
                 />
                 <div className={ROW_GROUP}>
@@ -451,12 +449,12 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onNavigate, onOpenMo
             <section>
                 <SettingsSectionHeading
                     title={t('Reviews')}
-                    subtitle={t('Tell us how Natively is working for you.')}
+                    subtitle={t('Tell us how FREECLUELY is working for you.')}
                 />
                 <div className={ROW_GROUP}>
                     <SettingsRow
                         icon={<Star size={20} />}
-                        title={t('Rate Natively')}
+                        title={t('Rate FREECLUELY')}
                         description={hasReviewed
                             ? t('This install has already sent a review. Thank you.')
                             : t('A star rating and a few words, if you like.')}
@@ -492,7 +490,7 @@ export const AboutSection: React.FC<AboutSectionProps> = ({ onNavigate, onOpenMo
                 indented — that is the duplicate-icon fix, not an oversight. */}
             <section>
                 <SettingsSectionHeading
-                    title={t('About Natively')}
+                    title={t('About FREECLUELY')}
                     subtitle={t('Designed to be invisible, intelligent, and trusted.')}
                 />
                 <div className={ROW_GROUP}>
