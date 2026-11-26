@@ -123,17 +123,18 @@
      ONE HAND NUDGE: -600 came out #4A68D4, which as accent text on the real
      light canvas (--bg-main #F2F2F7) is 4.46:1, a hair under AA. It is taken
      0.003 darker in OKLCH lightness to #4967D3 (4.52:1; white on it 5.04:1). */
-  --periwinkle-50:  #F7F4FF;
-  --periwinkle-100: #EFEAFE;
-  --periwinkle-200: #DED4FD; /* dark-mode hover */
-  --periwinkle-300: #C4B3FB; /* dark-mode accent (light bg, needs dark foreground) */
-  --periwinkle-400: #9C6FF3;
-  --periwinkle-500: #7C5CFF; /* = --toggle-on, the anchor */
-  --periwinkle-600: #6D4AE8; /* light-mode accent (see PeriwinkleContrastGuard.test.mjs) */
-  --periwinkle-700: #5B3FD0;
-  --periwinkle-800: #3F2593;
-  --periwinkle-900: #261A57;
-  --periwinkle-on-accent-dark: #14102A;  /* foreground for solid periwinkle-300 fills */
+  /* FREECLUELY EMERALD-TEAL PALETTE */
+  --periwinkle-50:  #ECFDF5;
+  --periwinkle-100: #D1FAE5;
+  --periwinkle-200: #A7F3D0; /* dark-mode hover */
+  --periwinkle-300: #6EE7B7; /* dark-mode accent (light bg, needs dark foreground) */
+  --periwinkle-400: #34D399;
+  --periwinkle-500: #10B981; /* = --toggle-on, the anchor */
+  --periwinkle-600: #059669; /* light-mode accent */
+  --periwinkle-700: #047857;
+  --periwinkle-800: #065F46;
+  --periwinkle-900: #064E3B;
+  --periwinkle-on-accent-dark: #052E16;  /* foreground for solid periwinkle-300 fills */
   --periwinkle-on-accent-light: #FFFFFF; /* foreground for solid periwinkle-600 fills */
 
   /* ─── Meeting notes → Usage tab, user question bubble ─────────────────────
@@ -9766,15 +9767,10 @@ html[data-platform="linux"][data-window="launcher"] body {
        repaints that bubble too. The one exception is inside the Lavender
        overlay's own panel, which takes its violet (overlayLavenderTheme.css). */
     --toggle-off: #474949;
-    --toggle-on: #7C5CFF;
-    /* The switches' ON track only (2026-11-09, owner request): the pale
-       periwinkle #6F7CF0, picked by the owner from a side-by-side (tried #D8CFF2, #C4B3FB, #B091F7, #9C6FF3, #7673EE). Everything
-       else that reads --toggle-on (Usage bubble, meters, toggle-blue inks)
-       keeps the stronger #7C5CFF. The ON knob goes white with a lift shadow
-       in both themes so it stays visible on this light track. */
-    --toggle-on-track: #6F7CF0;
-    --toggle-thumb: #EFEAFE;
-    --toggle-focus-ring: rgba(124, 92, 255, 0.22);
+    --toggle-on: #10B981;
+    --toggle-on-track: #059669;
+    --toggle-thumb: #ECFDF5;
+    --toggle-focus-ring: rgba(16, 185, 129, 0.22);
 }
 /* Light theme only (2026-10-24): the near-black #474949 off track read as a
    heavy dark pill on the white plaques, louder than the ON switches beside

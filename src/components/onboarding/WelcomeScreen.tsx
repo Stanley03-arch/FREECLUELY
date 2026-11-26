@@ -13,7 +13,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, Play } from 'lucide-react';
-import nativelyMark from '../../assets/logo.webp';
+import nativelyMark from '../../assets/logo.png';
 import { useT } from '../../i18n';
 import { useWelcomeTheme, useRise, LavenderButton } from './welcomeShared';
 import { fillText } from './i18nText';
@@ -40,7 +40,14 @@ export const WelcomeLeft: React.FC<Props> = ({ onGetStarted }) => {
     <div role="main" aria-labelledby="welcome-title" className="flex-1 min-w-0 h-full flex flex-col items-center text-center" style={{ padding: '64px 72px 48px' }}>
         <div className="my-auto flex flex-col items-center" style={{ gap: 22 }}>
           <motion.img {...rise(0.05)} src={nativelyMark} alt="FREECLUELY" draggable={false}
-            style={{ width: 60, height: 60, filter: t.markFilter }} />
+            style={{ width: 64, height: 64, borderRadius: 16 }} />
+          <motion.div {...rise(0.08)} style={{
+            fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+            padding: '4px 10px', borderRadius: 999,
+            background: 'rgba(16,185,129,0.12)', color: '#10B981', border: '1px solid rgba(16,185,129,0.28)',
+          }}>
+            {tr('Free · Open Source · Local Llama or BYOK')}
+          </motion.div>
           <motion.div {...rise(0.1)} style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.005em', color: t.quiet }}>
             {tr('Welcome to FREECLUELY')}
           </motion.div>
