@@ -1,0 +1,2695 @@
+import {
+  AlertCircle,
+  ArrowUpRight,
+  Brain,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  ChevronsRight,
+  Clock,
+  Layers,
+  Loader2,
+  Mic,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
+import DiagnosticReportActions from './DiagnosticReportActions';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useT } from '../../i18n';
+import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
+import { AccordionSection, Disclosure } from '../ui/AccordionSection';
+import { FreeTrialModal } from '../trial/FreeTrialModal';
+import { useTrialRemaining } from '../trial/useTrialRemaining';
+import { getMeetingInterfaceTheme, type MeetingInterfaceTheme } from '../../lib/meetingInterfaceTheme';
+import { BEAT, EASE_ENTER, EASE_LEAVE, INK, SETTLE } from '../../lib/plansMotion';
+import { Presence, SettingsMotionReady, SwapLabel } from './SettingsRow';
+import { isTrialClaimedLocally, markTrialClaimedLocally } from '../../lib/trialCampaign.mjs';
+import { trialRefusal } from '../../lib/trial/trialStart.mjs';
+import { CHECKOUT_URLS } from '../../config/urls';
+import { KeyResendHelp, KeyResendLink } from './KeyResendHelp';
+import { BillingCycleSwitch, PLANS_VIEWS, type PlansView } from '../ui/BillingCycleSwitch';
+import { StaticPrice } from '../ui/StaticPrice';
+import './apiTier.css';
+import { plansVisit } from '../../lib/funnel/plansVisit.mjs';
+import { withUpgradeLink, isCheckoutUrl, planChangeNote, carryLine, isYearlyLocked, heldPackNote, canUpgradeYearlyTo, formatCharge } from '../../lib/planChangeCopy.mjs';
+import type { NativelyPackKeyState } from '../../types/nativelyUsage';
+import { usePlansSeen } from '../../lib/funnel/usePlansSeen';
+import {
+  apiPlanLabel, endedPackFromRefusal, formatMeetingTime, isPackPlan, packStatus, PRO_PACKS, YEARLY_MONTHS_FREE,
+  type BillingCycle, type PackStatus,
+} from '../../lib/apiPlans.mjs';
+import {
+  formatCompact, formatMeter, formatUsd, normalizeQuota, TRIAL_FALLBACK_LIMITS,
+  type NativelyQuota, type NativelyPlanLimits, type NativelyUsageResponse, type TrialUsage, type TrialLimits, type UsageMeter,
+} from '../../types/nativelyUsage';
+
+// ─── Types ───────────────────────────────────────────────────
+// Shapes come from src/types/nativelyUsage.ts, which the preload bridge shares.
+// This file used to declare its own QuotaBucket/UsageData pair describing three
+// request-counted buckets; the product now meters five resources and shows four
+// categories, and a second local description of that is how the panel and the
+// server end up disagreeing about what a number means.
+interface UsageData {
+  plan: string;
+  member_since: string;
+  quota: NativelyQuota;
+  /** The plan row the server enforced. Absent on a cache written by an older build. */
+  limits?: NativelyPlanLimits;
+  /** 'monthly' | 'yearly' | 'pack'. Absent from servers and caches before 2026-11-06. */
+  billing_period?: NativelyUsageResponse['billing_period'];
+  /** A Pro pack's hours and use-by date; null on every other plan. */
+  pack?: NativelyUsageResponse['pack'];
+  /** Credit a plan change carried over (already in `limits`); null or absent when none. */
+  carry?: NativelyUsageResponse['carry'];
+}
+
+// Checkout links live in src/config/urls.ts, monthly and yearly side by side.
+const MASKED_NATIVELY_KEY = '•'.repeat(24);
+
+// Last-known usage, remembered across tab switches AND app restarts.
+//
+// SettingsOverlay unmounts this component every time the user switches away
+// from Plans & Billing, so React state alone can't survive a re-visit; a
+// module-level variable covers that but dies with the renderer process, so the
+// first open after every app launch was a blank/loading state again. Persisting
+// it means the Usage card paints last-known numbers immediately and a silent
+// background revalidation swaps in fresh ones a moment later.
+//
+// Numbers shown from here are always stale by definition. That is acceptable
+// because they are replaced within a second and are never used for enforcement
+// — the server owns the real quota. The one case where stale is actively
+// WRONG rather than merely old is a cache written before the billing period
+// rolled over: those bars would show last period's consumption against this
+// period's allowance. `resets_at` makes that detectable, so an expired entry is
+// dropped rather than displayed.
+const USAGE_STORAGE_KEY = 'natively_api_usage_v1';
+
+function readUsageCache(): UsageData | null {
+  try {
+    const raw = localStorage.getItem(USAGE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Shape-check before trusting: a partial write would otherwise throw inside
+    // the render path when a meter reads `.used`/`.limit`.
+    //
+    // Checks the CANONICAL keys, which also does the version check for free: an
+    // entry written by a build that predates the resource model has
+    // transcription/ai/search and no `knowledge`, so it is dropped and refetched
+    // rather than rendering four categories from three request counters.
+    // Checks what every meter needs to RENDER, not the full canonical set: the
+    // stored object has already been through normalizeQuota, and reranking is
+    // legitimately absent when the entry was written against a server that
+    // never metered it. Requiring it here would throw away a perfectly usable
+    // cache on every launch.
+    const q = parsed?.quota;
+    if (!q?.ai || !q?.voice || !q?.research || typeof q.ai.percent !== 'number') return null;
+    const resets = Date.parse(parsed.quota.resets_at);
+    if (Number.isFinite(resets) && resets < Date.now()) return null;
+    return parsed as UsageData;
+  } catch {
+    return null;
+  }
+}
+
+let usageCache: UsageData | null = readUsageCache();
+
+/**
+ * Whether the free-trial offer was on screen when this tab last settled, for
+ * this process. Its gate waits on two reads that only start AFTER the first
+ * paint (credentials, then the local trial token), so every visit painted the
+ * tab without it and then popped it in a frame or two later, shoving the key
+ * card and the plans ~120px down (measured 2026-09-26: 273 -> 396px at +67ms
+ * with 20-40ms reads). A revisit now paints the offer where the last visit
+ * left it. A stale guess (a trial claimed or a key saved elsewhere since)
+ * corrects itself when the reads land, which is what every visit did before.
+ * Not persisted: a launch's first visit still waits on the reads.
+ */
+let trialOfferLastSettled = false;
+
+function setUsageCache(next: UsageData | null): void {
+  usageCache = next;
+  try {
+    if (next) localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(next));
+    else localStorage.removeItem(USAGE_STORAGE_KEY);
+  } catch {
+    // Storage unavailable or full — in-memory caching still works for this
+    // session, only the cross-restart benefit is lost.
+  }
+}
+
+// The plan chooser.
+//
+// `price` here is a FALLBACK, not the source of truth: the live figure comes
+// from GET /v1/plans via `planCatalog` below, keyed by `planKey`. Keeping a
+// literal means the chooser still renders something sensible offline or before
+// the catalog arrives; letting it be the only value is what allowed the prices
+// and allowances in this file to drift away from the ones actually charged.
+export const PLANS = [
+  {
+    id: 'natively_api_standard_monthly',
+    name: 'Standard',
+    planKey: 'standard',
+    price: '$8',
+    // 10x monthly: two months free. The allowance still refills every month.
+    yearlyPrice: '$80',
+    url: CHECKOUT_URLS.apiStandard,
+    yearlyUrl: CHECKOUT_URLS.apiStandardYearly,
+    badgeText: 'Basic',
+    includesPro: false,
+    description: 'Essential transcription and AI requests for light, everyday use.',
+    note: 'Does not include the Natively Pro desktop app license. Your own API keys still work.',
+    // The qualitative ladder (light -> regular -> high -> continuous) stays: it
+    // is what a buyer skims. The EXACT allowances now render underneath it from
+    // GET /v1/plans — see PlanAllowances.
+    //
+    // Those figures used to be left out on the grounds that publishing them
+    // meant a copy change whenever the server retuned a limit. Fetching them
+    // removes that objection entirely, and the comment that used to sit here
+    // listing them "for reference" proves the point: every number in it (AI
+    // 500/1k/2k/3k, STT 200/500/1k/2k min, search 20/100/200/300) was wrong by
+    // the time anyone read it.
+    features: [
+      'Light everyday AI usage',
+      'Light transcription volume',
+      'Occasional web searches',
+    ],
+  },
+  {
+    id: 'natively_api_pro_monthly',
+    name: 'Pro',
+    planKey: 'pro',
+    price: '$15',
+    // 10x monthly: two months free. The allowance still refills every month.
+    yearlyPrice: '$150',
+    url: CHECKOUT_URLS.apiPro,
+    yearlyUrl: CHECKOUT_URLS.apiProYearly,
+    badgeText: 'Recommended',
+    includesPro: true,
+    description: 'The full Natively Pro app plus API usage for daily work.',
+    note: 'Includes the full Natively Pro desktop app license while you are subscribed.',
+    features: [
+      'Daily professional AI usage',
+      'Regular meeting transcription',
+      'Frequent web searches',
+      'Natively Pro features',
+    ],
+  },
+  {
+    id: 'natively_api_max_monthly',
+    name: 'Max',
+    planKey: 'max',
+    price: '$25',
+    // 10x monthly: two months free. The allowance still refills every month.
+    yearlyPrice: '$250',
+    url: CHECKOUT_URLS.apiMax,
+    yearlyUrl: CHECKOUT_URLS.apiMaxYearly,
+    badgeText: 'Best value',
+    includesPro: true,
+    description: 'Higher volume for developers and teams doing more.',
+    note: 'Includes the full Natively Pro desktop app license while you are subscribed.',
+    features: [
+      'High-volume AI usage',
+      'Heavy meeting transcription',
+      'High-volume web searches',
+      'Natively Pro features',
+    ],
+  },
+  {
+    id: 'natively_api_ultra_monthly',
+    name: 'Ultra',
+    planKey: 'ultra',
+    price: '$35',
+    // 10x monthly: two months free. The allowance still refills every month.
+    yearlyPrice: '$350',
+    url: CHECKOUT_URLS.apiUltra,
+    yearlyUrl: CHECKOUT_URLS.apiUltraYearly,
+    badgeText: 'For heavy users',
+    includesPro: true,
+    description: 'For the heaviest daily use: about 12.5 hours of meetings a month.',
+    note: 'Includes the full Natively Pro desktop app license while you are subscribed.',
+    features: [
+      'Maximum AI usage, all day',
+      'The most meeting transcription',
+      'Maximum web searches',
+      'Natively Pro features',
+    ],
+  },
+] as const;
+
+// ─── Website tier look ───────────────────────────────────────
+// The plan card and the two packs are drawn as the website's pricing tiers
+// (natively-website src/components/PricingSection.tsx `Tier`, the anatomy
+// Unlock Pro already uses in upgrade/UnlockProPlans.tsx): a mesh band with the
+// tier's motif, a price card floating back up over it, and a tray of what is
+// included. The colours, meshes and both themes live in index.css under
+// `.api-tier`; this only says which mesh and motif each tier wears.
+//
+// One lavender family, deepening with the tier, replaced the four-hue fill
+// ladder (teal / azure / amethyst / cherry) on 2026-11-09. Pro keeps the one
+// saturated band and the lavender button, because it is the recommended plan.
+export type TierMesh = 'standard' | 'pro' | 'max' | 'ultra';
+export type TierPattern = 'dots' | 'rings' | 'grid';
+
+const TIER_LOOK: Record<string, { mesh: TierMesh; pattern: TierPattern }> = {
+  standard: { mesh: 'standard', pattern: 'dots' },
+  pro: { mesh: 'pro', pattern: 'rings' },
+  max: { mesh: 'max', pattern: 'rings' },
+  ultra: { mesh: 'ultra', pattern: 'grid' },
+};
+
+// The website's per-tier motifs, copied from UnlockProPlans.tsx `motif` and
+// held still (no hover drift). Strokes read --tier-line / --tier-dot /
+// --tier-accent, so the CSS re-tints them per theme and for the Pro band.
+const motifFade = (angle: string, stop: string): React.CSSProperties => ({
+  maskImage: `linear-gradient(${angle}, #000 0%, transparent ${stop})`,
+  WebkitMaskImage: `linear-gradient(${angle}, #000 0%, transparent ${stop})`,
+});
+const TIER_MOTIF: Record<TierPattern, React.CSSProperties[]> = {
+  dots: [
+    { inset: -24, backgroundImage: 'radial-gradient(var(--tier-dot) 1px, transparent 1px)', backgroundSize: '11px 11px', ...motifFade('115deg', '62%') },
+    { right: -40, top: -48, width: 140, height: 140, borderRadius: '50%', border: '1px solid var(--tier-line)' },
+    { right: -14, top: -22, width: 88, height: 88, borderRadius: '50%', border: '1px dashed var(--tier-line)' },
+  ],
+  rings: [
+    { right: -30, top: -50, width: 120, height: 120, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(255,255,255,0.38), rgba(255,255,255,0))' },
+    { right: -64, top: -80, width: 210, height: 210, borderRadius: '50%', border: '1px solid var(--tier-line)' },
+    { right: -40, top: -56, width: 150, height: 150, borderRadius: '50%', border: '1px solid var(--tier-line)' },
+    { right: -16, top: -36, width: 92, height: 92, borderRadius: '50%', border: '1px solid var(--tier-line)' },
+  ],
+  grid: [
+    {
+      inset: -24,
+      backgroundImage: 'linear-gradient(var(--tier-line) 1px, transparent 1px), linear-gradient(90deg, var(--tier-line) 1px, transparent 1px)',
+      backgroundSize: '20px 20px', ...motifFade('125deg', '66%'),
+    },
+    // Two cells of the grid, filled, like days marked on a calendar.
+    { left: 137, top: 17, width: 19, height: 19, background: 'var(--tier-accent)' },
+    { left: 157, top: 37, width: 19, height: 19, background: 'var(--tier-accent)', opacity: 0.55 },
+    { right: -32, top: -40, width: 104, height: 104, borderRadius: 18, transform: 'rotate(38deg)', border: '1px solid var(--tier-dot)' },
+    { right: -8, top: -16, width: 56, height: 56, borderRadius: 11, transform: 'rotate(38deg)', border: '1px solid var(--tier-dot)' },
+  ],
+};
+
+/** The band at the top of a tier card: its mesh, its motif, name and badge. */
+export function TierBand({ mesh, pattern, name, badge }: { mesh: TierMesh; pattern: TierPattern; name: string; badge?: string }) {
+  return (
+    <div className="api-tier-band" data-mesh={mesh} data-pattern={pattern}>
+      {TIER_MOTIF[pattern].map((style, i) => (
+        <span key={i} aria-hidden="true" className="api-tier-motif" style={style} />
+      ))}
+      <div className="api-tier-band-row">
+        <span className="api-tier-name">{name}</span>
+        {badge && <span className="api-tier-badge">{badge}</span>}
+      </div>
+    </div>
+  );
+}
+
+// cardSlideLeftVariants / cardSlideRightVariants / cardCtaVariants were removed
+// here: the redesign replaced the two-column body (which carried them on the
+// left column, the features panel and the CTA block) with a mesh header +
+// single body, so nothing consumed them any more. Only the container-level
+// opacity crossfade between tiers survives.
+
+// Odometer price: each digit is a reel of 0-9 that rolls to its value. The
+// card body is keyed by plan, so this mounts fresh on every switch; it starts
+// on the previous plan's figure and rolls to the new one on the next frame.
+// The Monthly / Yearly switch keeps the card mounted, so there the reels roll
+// in place ($15 -> $150).
+// Three reels cover whole dollars up to $999 (yearly Ultra is $350). A leading
+// reel collapses to zero width when the price has fewer digits ($8, $80).
+// Any other label (cents, $1000+) is shown as plain text rather than a reel
+// parked between digits.
+const PRICE_DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+const PRICE_ROLL_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+/** A yearly price label as its monthly share, "$150" -> "$12.50". Null for a
+ *  label it cannot read, so the card falls back to "$150 / year". */
+function perMonthOfYearly(label: string): string | null {
+  const m = /^\$(\d+(?:\.\d+)?)$/.exec(label);
+  return m ? `$${(Number(m[1]) / 12).toFixed(2)}` : null;
+}
+const reelDollars = (label: string): number | null => {
+  const m = /^\$(\d{1,3})$/.exec(label);
+  return m ? Number(m[1]) : null;
+};
+
+function RollingPrice({ price, from }: { price: string; from: string }) {
+  const reduceMotion = useReducedMotion();
+  const value = reelDollars(price);
+  const [shown, setShown] = useState(reduceMotion ? value : reelDollars(from) ?? value);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(value));
+    return () => cancelAnimationFrame(id);
+  }, [value]);
+
+  // A price the reels cannot show ("$12.50") keeps the reels' line height.
+  if (value === null || shown === null) return <StaticPrice price={price} />;
+  const hundreds = Math.floor(shown / 100);
+  const tens = Math.floor(shown / 10) % 10;
+  const reel = (digit: number, delayMs: number) => (
+    <span style={{ display: 'inline-block', height: '1em', overflow: 'hidden' }}>
+      <span
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          transform: `translateY(${-digit}em)`,
+          transition: reduceMotion ? 'none' : `transform 620ms ${PRICE_ROLL_EASE} ${delayMs}ms`,
+        }}
+      >
+        {PRICE_DIGITS.map((d) => (
+          <span key={d} style={{ height: '1em' }}>{d}</span>
+        ))}
+      </span>
+    </span>
+  );
+  // A leading reel: present only while the price has that many digits.
+  const leading = (shownNow: boolean, digit: number, delayMs: number) => (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        overflow: 'hidden',
+        width: shownNow ? '1ch' : 0,
+        opacity: shownNow ? 1 : 0,
+        transition: reduceMotion ? 'none' : `width 450ms ${PRICE_ROLL_EASE}, opacity 300ms`,
+      }}
+    >
+      {reel(digit, delayMs)}
+    </span>
+  );
+
+  return (
+    <span role="img" aria-label={`$${value}`} style={{ display: 'inline-flex' }}>
+      <span aria-hidden="true">$</span>
+      {leading(shown >= 100, hundreds, 0)}
+      {leading(shown >= 10, tens, 20)}
+      <span aria-hidden="true">{reel(shown % 10, 40)}</span>
+    </span>
+  );
+}
+
+// Both tiers' text share one absolutely-positioned cell, so a plain crossfade
+// double-exposed them: for as long as the two fades overlapped the card showed
+// two sets of text in one place. Now it is a directional handoff that follows
+// the tab pill: the incoming tier arrives 8px from the side the pill is
+// travelling toward, sharpening from a 2px blur, on the pill's own clock
+// (250ms smooth-out, the clock the card's fill cross-fades on too); the
+// outgoing one leaves 4px the other way on the quick clock (150ms), so it is
+// mostly gone before the new text has moved. Reduced motion keeps only the
+// fade: index.css pins filter and transform on `.natively-api-detail-card > div`.
+const TIER_SWAP_EASE = [0.22, 1, 0.36, 1] as const;
+const cardContainerVariants = {
+  enter: (direction: number) => ({
+    opacity: 0,
+    x: direction * 8,
+    filter: 'blur(2px)',
+  }),
+  center: {
+    opacity: 1,
+    x: 0,
+    filter: 'blur(0px)',
+    // Then cleared: framer animates to blur(0px) and would leave it there, and
+    // any filter at rest makes this the backdrop root for the glass inside it
+    // and the containing block for fixed children.
+    transitionEnd: { filter: 'none' },
+    transition: { duration: 0.25, ease: TIER_SWAP_EASE },
+  },
+  exit: (direction: number) => ({
+    opacity: 0,
+    x: direction * -4,
+    filter: 'blur(2px)',
+    transition: { duration: 0.15, ease: TIER_SWAP_EASE },
+  })
+};
+
+// ─── Quota bar ───────────────────────────────────────────────
+// One bar colour for all three buckets. They used to be orchid / violet /
+// emerald, which made three neutral facts read as three different *kinds* of
+// thing and put a third and fourth hue on a surface that should carry one
+// accent. Colour here now means exactly one thing — amber = running low.
+/**
+ * One usage meter: label, a figure, and a bar.
+ *
+ * ── TWO READINGS, AND WHY BOTH EXIST ────────────────────────────────────────
+ *
+ * `percentOnly` shows "63%"; the default shows "4.1M / 6.5M · 63%".
+ *
+ * The pair answers "can I index this repo?", which a proportion cannot — that
+ * needs tokens remaining, not a fraction of an allowance. But it also prints the
+ * plan's exact allowance on screen, and on the monthly panel Evin does not want
+ * the entitlement spelled out; the percentage carries the same "am I running
+ * low?" signal without it.
+ *
+ * So the trial panel keeps the figures (a trial's allowance is public, and a
+ * trial user is precisely the person deciding whether a task will fit), and the
+ * monthly panel takes the percentage. The two never render together — trial and
+ * saved-key states are mutually exclusive in practice — so this is one style per
+ * screen, not two on one.
+ *
+ * Note this is the shape KnowledgeUsage's headline already had, so the monthly
+ * card is now internally consistent rather than one bare percentage among three
+ * used/limit pairs.
+ */
+function ResourceMeter({
+  label,
+  icon: Icon,
+  meter,
+  sub = false,
+  percentOnly = false,
+}: {
+  label: string;
+  icon?: React.ElementType;
+  meter: UsageMeter | undefined;
+  /** Rendered smaller and unlabelled by icon, for the Knowledge breakdown. */
+  sub?: boolean;
+  /** Show only the percentage, never the plan's allowance. */
+  percentOnly?: boolean;
+}) {
+  // An absent meter is not zero usage — it is a response this build does not
+  // understand, or one that has not arrived. Render nothing rather than a
+  // confident 0%.
+  if (!meter) return null;
+  const pct = Number.isFinite(meter.visual_percent) ? meter.visual_percent : 0;
+  // The REAL percentage drives the warning colour, so a meter that has gone
+  // past its limit reads as over rather than as exactly full.
+  const real = Number.isFinite(meter.percent) ? meter.percent : 0;
+  const isHigh = real >= 80;
+  const isOver = real > 100;
+  return (
+    <div className={sub ? 'space-y-1.5' : 'space-y-2'}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          {Icon && <Icon size={12} className="text-text-tertiary" strokeWidth={1.75} />}
+          <span className={`${sub ? 'text-[11px]' : 'text-[12px]'} text-text-secondary truncate`}>{label}</span>
+        </div>
+        <span
+          className={`${sub ? 'text-[11px]' : 'text-[12px]'} tabular-nums shrink-0 ${
+            isHigh ? 'text-amber-500 font-medium' : 'text-text-tertiary'
+          }`}
+        >
+          {/* An unmetered resource has no percentage to show, so it says
+              "Unlimited" in both readings rather than rendering an empty slot
+              or a misleading 0%. */}
+          {percentOnly ? (
+            meter.limit == null ? 'Unlimited' : `${Math.round(real)}%`
+          ) : (
+            <>
+              {formatMeter(meter)}
+              {meter.limit != null && (
+                <span className="opacity-60"> · {Math.round(real)}%</span>
+              )}
+            </>
+          )}
+        </span>
+      </div>
+      {/* `natively-meter-*` carries the material (see index.css). The colour
+          is a modifier rather than a Tailwind fill, because the hue drives the
+          specular's bloom as well as the body and the three have to move
+          together. */}
+      <div className={`${sub ? 'h-[4px]' : 'h-[6px]'} natively-meter-track`}>
+        <div
+          className={`natively-meter-fill transition-[width] duration-700 ease-out motion-reduce:transition-none ${
+            isOver ? 'natively-meter-fill--over' : isHigh ? 'natively-meter-fill--high' : ''
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Knowledge Usage: one meter over two.
+ *
+ * The headline is the server's `knowledge.percent`: an even 50/50 blend of the
+ * two halves' percentages, so each capability has equal say. It is NOT a ratio
+ * of summed tokens — reranker allowances are ~2.5x the embedding ones, so that
+ * would have read ~29% for a customer who had spent every embedding token.
+ *
+ * The blend has its own blind spot, which is why the warning colour reads
+ * `max_half_percent` instead: 100% embeddings with reranking untouched blends
+ * to a mid-range 50%, and since the halves are enforced independently that
+ * customer's indexing is already dead. The number says how much is used; the
+ * colour says whether anything is blocked. The breakdown below says which.
+ *
+ * The breakdown is a disclosure rather than two more top-level rows: embeddings
+ * and reranking are one product concept to the person paying for them, and
+ * promoting both to peers of "AI Usage" implies four independent things to
+ * budget instead of three.
+ */
+function KnowledgeUsage({ knowledge, percentOnly = false }: { knowledge: NativelyQuota['knowledge'] | undefined; percentOnly?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!knowledge) return null;
+  const pct = Number.isFinite(knowledge.percent) ? knowledge.percent : 0;
+  // The WORST half drives the warning, the blend drives the number. They answer
+  // different questions: "how much have I used" vs "is anything already
+  // blocked". Embeddings at 100% with reranking untouched blends to 50%, and
+  // the halves are enforced independently — so indexing is dead while the
+  // headline reads mid-range. Colouring on the blend would hide exactly the
+  // state someone opens this panel to diagnose.
+  const worstHalf = Number.isFinite(knowledge.max_half_percent as number)
+    ? (knowledge.max_half_percent as number)
+    : pct;
+  const isHigh = worstHalf >= 80;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex items-center gap-2 min-w-0 cursor-pointer group"
+        >
+          <Layers size={12} className="text-text-tertiary" strokeWidth={1.75} />
+          <span className="text-[12px] text-text-secondary group-hover:text-text-primary transition-colors duration-150 motion-reduce:transition-none">
+            Knowledge Usage
+          </span>
+          <ChevronDown
+            size={11}
+            strokeWidth={2}
+            className={`text-text-tertiary transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
+        <span
+          className={`text-[12px] tabular-nums shrink-0 ${isHigh ? 'text-amber-500 font-medium' : 'text-text-tertiary'}`}
+        >
+          {Math.round(pct)}%
+        </span>
+      </div>
+      <div className="h-[6px] natively-meter-track">
+        <div
+          className={`natively-meter-fill transition-[width] duration-700 ease-out motion-reduce:transition-none ${
+            worstHalf > 100 ? 'natively-meter-fill--over' : isHigh ? 'natively-meter-fill--high' : ''
+          }`}
+          style={{ width: `${Math.min(100, Math.max(0, knowledge.visual_percent ?? 0))}%` }}
+        />
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="knowledge-detail"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.18, ease: EASE_ENTER }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="pl-5 pt-1 space-y-2.5">
+              <ResourceMeter label="Embeddings" meter={knowledge.embedding} sub percentOnly={percentOnly} />
+              <ResourceMeter label="Reranking" meter={knowledge.reranker} sub percentOnly={percentOnly} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * The exact monthly allowances for one tier, in the product's own vocabulary.
+ *
+ * Renders NOTHING until the catalog arrives. That is the point of it being a
+ * fetch rather than a constant: an empty block is honest about not knowing,
+ * where a compiled-in table is confidently wrong the first time someone retunes
+ * a limit server-side. The qualitative feature list above still carries the
+ * card on its own if this never loads.
+ *
+ * Knowledge is shown as its two halves rather than a single figure — they are
+ * different units of work with different quotas, and "4M embedding + 10M
+ * reranker" is information a buyer can act on where a summed number is not.
+ */
+function PlanAllowances({ limits }: { limits: NativelyPlanLimits | undefined }) {
+  if (!limits) return null;
+  const rows: Array<[string, string]> = [
+    ['AI', `${formatCompact(limits.ai_tokens)} tokens`],
+    ['Voice', `${limits.transcription_minutes.toLocaleString('en-US')} min`],
+    ['Knowledge', `${formatCompact(limits.embedding_tokens)} + ${formatCompact(limits.reranker_tokens)} tokens`],
+    // Runs, not dollars (2026-09-21). The allowance is sold as a count of
+    // complete company researches; the dollar figure underneath is the credit
+    // budget that funds them and means nothing to a buyer on its own.
+    ['Research', limits.research_runs != null
+      ? `${limits.research_runs} company researches`
+      : `${formatUsd(limits.research_credits_usd)}`],
+  ];
+  return (
+    <div className="mt-3">
+      <div className="natively-api-body-rule h-px mb-2.5" />
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        {rows.map(([label, value]) => (
+          <React.Fragment key={label}>
+            <dt className="natively-api-on-fill-dim text-[10px] leading-snug opacity-80">{label}</dt>
+            <dd className="natively-api-on-fill-dim text-[10px] leading-snug tabular-nums text-right">{value}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+// ─── Active trial card ───────────────────────────────────────
+// This card used to carry a three-up grid of usage meters — AI, Voice,
+// Research, each an icon, a label, a used-over-limit pair and a track. The
+// "Usage this trial" section at the foot of this panel renders THE SAME THREE
+// NUMBERS, forty pixels of scroll away, as ResourceMeter rows: the house row
+// idiom, with percentages, a Knowledge row, and a red over-limit state the
+// grid never had. Two renderings of one fact in two visual languages, and the
+// bespoke one was the weaker of the two.
+//
+// So the two surfaces split the trial's two resources instead of both trying
+// to show one of them: this card owns the TIME, and the usage table owns the
+// ALLOWANCE. Which also lets the clock stop being an 11px chip in the section
+// label and become the sentence the card is actually there to say.
+//
+// Anatomy is the offer card's, deliberately: one line of text on the left, one
+// compact control on the right, on the `natively-key-card` plaque. Two states
+// of one feature should not be two different shapes.
+function ActiveTrialCard({ expiresAt, onOptions }: { expiresAt: string; onOptions: () => void }) {
+  const { clock, ended, isWarning } = useTrialRemaining(expiresAt);
+  return (
+    <div>
+      <SectionLabel>Free trial active</SectionLabel>
+      <Card>
+        <div className="px-4 py-4">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-medium text-text-primary tracking-[-0.01em]">
+                {ended ? (
+                  'Your free trial has ended'
+                ) : (
+                  <>
+                    {/* The clock is the only part that moves, so it is the
+                        only part that gets weight and colour. `tabular-nums`
+                        keeps the sentence from reflowing every second, which
+                        a proportional 4 -> 1 does at this size. Amber in the
+                        last two minutes: the same threshold and the same hue
+                        the usage rows use when an allowance runs low, so one
+                        colour means one thing across the panel. */}
+                    <span className={`tabular-nums transition-colors duration-500 ease-out ${isWarning ? 'text-amber-500' : ''}`}>{clock}</span>
+                    {' left in your free trial'}
+                  </>
+                )}
+              </p>
+              <p className="text-[12px] text-text-secondary mt-1 leading-snug">
+                {ended
+                  ? 'Add a key or choose a plan to keep going.'
+                  : 'Your usage so far is below.'}
+              </p>
+            </div>
+
+            {/* Same control as Activate and as Start free trial, in its
+                `secondary` state: an achromatic ghost at rest that takes the
+                READY material on hover — the periwinkle clay, the specular
+                inset, the lift and the glow (see .natively-key-cta in
+                index.css, where `secondary` joins the ready:hover selector
+                list rather than getting a copy of it).
+                Ghost at rest is deliberate: the plan list below is the primary
+                action on this screen, and two saturated pills in one viewport
+                is no hierarchy at all. */}
+            <button
+              onClick={onOptions}
+              data-state="secondary"
+              className="natively-key-cta shrink-0 h-9 px-5 flex items-center justify-center gap-1.5 text-[13px] font-medium select-none cursor-pointer"
+            >
+              See your options
+              <ArrowUpRight size={14} strokeWidth={2.2} />
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Card wrapper ────────────────────────────────────────────
+/**
+ * A pill's label changing state (Activate -> Activating... -> Saved): glyph and
+ * word swap as ONE unit, Settings' text swap (SettingsRow's Presence: out up,
+ * in from below, 2px blur, 150ms each way). Always ready, because these labels
+ * only ever change in answer to a click.
+ */
+function CtaLabel({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <SettingsMotionReady.Provider value={true}>
+      <Presence kind="text" id={id}>{children}</Presence>
+    </SettingsMotionReady.Provider>
+  );
+}
+
+// Every container in this tab wears the `natively-key-card` plaque, so none of
+// them falls back to the grey item surface in light theme.
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`natively-key-card bg-bg-item-surface rounded-2xl border border-border-subtle overflow-hidden ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ─── Section label ───────────────────────────────────────────
+// One small-caps label above each container, replacing the mixture of boxed
+// headers, inline titles and uppercase micro-labels this tab used to open
+// every section with.
+function SectionLabel({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 px-1 mb-2">
+      <p className="text-[11px] font-medium text-text-tertiary uppercase tracking-[0.07em]">
+        {children}
+      </p>
+      {aside}
+    </div>
+  );
+}
+
+// ─── Trial meter ─────────────────────────────────────────────
+// A trial's counters arrive as raw used/limit pairs from /v1/trial/status,
+// while ResourceMeter speaks the /v1/usage `UsageMeter` shape. This converts,
+// so both usage tables are literally the same component rather than a
+// look-alike written twice.
+//
+// `percent` is the real one and may exceed 100 (AI bills after a stream
+// completes); `visual_percent` is clamped, because a bar wider than its track
+// is a layout bug, not information. Same split the server applies for paid
+// plans — see buildResourceQuota in the API's lib/plans.js.
+function trialMeter(used: number, limit: number, unit: UsageMeter['unit']): UsageMeter {
+  const safeUsed = Number.isFinite(used) && used > 0 ? used : 0;
+  // A zero or missing limit would make percent Infinity/NaN and blank the row.
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 0;
+  const percent = safeLimit > 0 ? (safeUsed / safeLimit) * 100 : 0;
+  return {
+    used: safeUsed,
+    limit: safeLimit > 0 ? safeLimit : null,
+    remaining: safeLimit > 0 ? Math.max(0, safeLimit - safeUsed) : null,
+    percent: Number(percent.toFixed(1)),
+    visual_percent: Math.min(100, Math.max(0, Number(percent.toFixed(1)))),
+    unit,
+  };
+}
+
+// The Monthly / Yearly switch is shared with the end-of-trial card:
+// ../ui/BillingCycleSwitch.tsx.
+
+// ─── Plan rail ───────────────────────────────────────────────
+// The four plans in one row that scrolls sideways, about two cards wide with
+// the next one peeking in. It advances one card every few seconds and wraps
+// back to the first. It holds still only while someone is using it: the
+// pointer over a card, a scroll of their own (for a few seconds after), or
+// keyboard focus inside it. It also skips turns nobody can see (window
+// hidden) and never moves under reduced motion.
+const RAIL_STEP_MS = 3500;
+/** How long each yearly price face ("/ month", "/ year") stays up. */
+const YEARLY_FACE_MS = 3000;
+const RAIL_RESUME_AFTER_MS = 6000;
+
+function PlanRail({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
+  const [edge, setEdge] = useState<'start' | 'middle' | 'end'>('start');
+  // Funnel (plans_visit): the plan row was on screen, and which of its cards.
+  // railOnScreen gates the card count: the row keeps rotating while scrolled
+  // out of view or folded inside a closed "Change plan", and cards turning
+  // past there were never seen.
+  const railOnScreenRef = useRef(false);
+  const seenRef = usePlansSeen(() => plansVisit.seen('api_plans'), (onScreen) => {
+    railOnScreenRef.current = onScreen;
+    if (onScreen) countCardsRef.current();
+  });
+  const railRef = useCallback((el: HTMLDivElement | null) => { ref.current = el; seenRef(el); }, [seenRef]);
+  const countCardsRef = useRef(() => {});
+  countCardsRef.current = () => {
+    const rail = ref.current;
+    if (!rail || !railOnScreenRef.current) return;
+    // A card counts once most of its width sits inside the row's window.
+    const box = rail.getBoundingClientRect();
+    rail.querySelectorAll<HTMLElement>('[data-tier]').forEach((card) => {
+      const r = card.getBoundingClientRect();
+      const inside = Math.min(r.right, box.right) - Math.max(r.left, box.left);
+      if (r.width > 0 && inside >= r.width * 0.6 && card.dataset.tier) plansVisit.card(card.dataset.tier);
+    });
+  };
+  useEffect(() => plansVisit.onStart(() => countCardsRef.current()), []);
+
+  useEffect(() => {
+    const rail = ref.current;
+    if (!rail) return;
+    let hovered = false;
+    let focused = false;
+    let heldUntil = 0;
+
+    const updateEdge = () => {
+      const max = rail.scrollWidth - rail.clientWidth;
+      setEdge(rail.scrollLeft <= 2 ? 'start' : rail.scrollLeft >= max - 2 ? 'end' : 'middle');
+    };
+    // The person's own scrolling is read from their input (wheel and
+    // trackpad, a drag, arrow keys), never from scroll events, so the
+    // rail's own smooth scroll can never be mistaken for it.
+    const hold = () => { heldUntil = Date.now() + RAIL_RESUME_AFTER_MS; };
+    // plans_visit's rail_scrolled: the row actually moved sideways AND the
+    // person had just pushed it that way (a sideways wheel or trackpad swipe,
+    // a drag, an arrow key). A click on a Get button, the page scrolling up and
+    // down under the pointer, and the row's own rotation do not count.
+    let pushedAt = -Infinity;
+    let autoUntil = 0;
+    let lastLeft = rail.scrollLeft;
+    let dragging = false;
+    const pushed = () => { pushedAt = Date.now(); };
+    const onWheel = (e: WheelEvent) => { hold(); if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) pushed(); };
+    const onPointerDown = () => { hold(); dragging = true; };
+    const onPointerMove = () => { if (dragging) pushed(); };
+    const onPointerUp = () => { dragging = false; };
+    const onKeyDown = (e: KeyboardEvent) => { hold(); if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') pushed(); };
+    const onRailScroll = () => {
+      updateEdge();
+      const moved = rail.scrollLeft !== lastLeft;
+      lastLeft = rail.scrollLeft;
+      if (moved && Date.now() >= autoUntil && Date.now() - pushedAt < 800) plansVisit.railScrolled();
+      countCardsRef.current();
+    };
+    const onEnter = () => { hovered = true; };
+    const onLeave = () => { hovered = false; };
+    // Keyboard focus only: a mouse click on a Get button leaves focus inside
+    // the rail, and that alone must not stop the rotation for good.
+    const onFocusIn = (e: FocusEvent) => { focused = (e.target as Element | null)?.matches?.(':focus-visible') ?? false; };
+    const onFocusOut = (e: FocusEvent) => { if (!rail.contains(e.relatedTarget as Node | null)) focused = false; };
+
+    rail.addEventListener('scroll', onRailScroll, { passive: true });
+    rail.addEventListener('wheel', onWheel, { passive: true });
+    rail.addEventListener('pointerdown', onPointerDown);
+    rail.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    rail.addEventListener('touchstart', hold, { passive: true });
+    rail.addEventListener('keydown', onKeyDown);
+    rail.addEventListener('pointerenter', onEnter);
+    rail.addEventListener('pointerleave', onLeave);
+    rail.addEventListener('focusin', onFocusIn);
+    rail.addEventListener('focusout', onFocusOut);
+    updateEdge();
+
+    const timer = reduceMotion ? null : window.setInterval(() => {
+      if (hovered || focused || document.hidden || Date.now() < heldUntil) return;
+      const card = rail.firstElementChild as HTMLElement | null;
+      if (!card) return;
+      const gap = parseFloat(getComputedStyle(rail).columnGap) || 0;
+      const step = card.offsetWidth + gap;
+      const max = rail.scrollWidth - rail.clientWidth;
+      if (max <= 0) return;
+      autoUntil = Date.now() + 1200; // its own smooth scroll is not the person's
+      rail.scrollTo({ left: rail.scrollLeft >= max - 2 ? 0 : Math.min(rail.scrollLeft + step, max), behavior: 'smooth' });
+    }, RAIL_STEP_MS);
+
+    return () => {
+      if (timer !== null) window.clearInterval(timer);
+      rail.removeEventListener('scroll', onRailScroll);
+      rail.removeEventListener('wheel', onWheel);
+      rail.removeEventListener('pointerdown', onPointerDown);
+      rail.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      rail.removeEventListener('touchstart', hold);
+      rail.removeEventListener('keydown', onKeyDown);
+      rail.removeEventListener('pointerenter', onEnter);
+      rail.removeEventListener('pointerleave', onLeave);
+      rail.removeEventListener('focusin', onFocusIn);
+      rail.removeEventListener('focusout', onFocusOut);
+    };
+  }, [reduceMotion]);
+
+  return (
+    <div ref={railRef} className="api-tier-rail" data-edge={edge} role="list" aria-label="Natively API plans">
+      {children}
+    </div>
+  );
+}
+
+// ─── Hourly <-> Monthly / Yearly ──────────────────────────────
+// The swap between the four plans and the two packs, the same as the website's
+// pricing page (natively-website PricingSection.tsx, DISSOLVE): the old row
+// softens and sinks a touch and leaves the flow at once (popLayout); the new
+// cards settle out of a soft blur on a bounce-free spring, 60ms apart.
+const DISSOLVE = {
+  leave: { opacity: 0, scale: 0.985, filter: 'blur(6px)', transition: { duration: 0.22, ease: EASE_ENTER } },
+  from: { opacity: 0, scale: 0.97, y: 10, filter: 'blur(8px)' },
+  settle: (i: number) => ({
+    default: { type: 'spring' as const, duration: 0.65, bounce: 0, delay: 0.08 + i * 0.06 },
+    opacity: { duration: 0.45, ease: EASE_ENTER, delay: 0.08 + i * 0.06 },
+    filter: { duration: 0.5, ease: EASE_ENTER, delay: 0.08 + i * 0.06 },
+  }),
+};
+
+// ─── Pro packs ───────────────────────────────────────────────
+// Two one-time buys beside the subscriptions, drawn as small website tiers
+// like the plan card above: Light on the Max band, Heavy on the Ultra band.
+// The allowance is the product, so it gets the two rows; the rule that makes
+// a pack a pack (hours OR days, whichever first; Pro only while the AI and
+// transcription both run on Natively API, 2026-11-16) is said once, under both.
+// The Pro rule: electron/services/packs/packProRule.ts.
+const PACK_LOOK: Record<string, { mesh: TierMesh; pattern: TierPattern; blurb: string }> = {
+  pack_light: { mesh: 'max', pattern: 'dots', blurb: 'For an interview or two: a few hours of Pro, paid once.' },
+  pack_heavy: { mesh: 'ultra', pattern: 'grid', blurb: 'For a busy week of meetings, with no plan to cancel.' },
+};
+
+function ProPacks({ currentPlan, onBuy, arrive, changeNote }: { currentPlan?: string; onBuy: (url: string) => void; arrive: (i: number) => object; changeNote?: string | null }) {
+  const urls: Record<string, string> = { pack_light: CHECKOUT_URLS.packLight, pack_heavy: CHECKOUT_URLS.packHeavy };
+  const current = currentPlan?.toLowerCase();
+  // Funnel (plans_visit): the packs were on screen during this visit.
+  const seenRef = usePlansSeen(() => plansVisit.seen('packs'));
+  return (
+    <div ref={seenRef}>
+      <div className="grid grid-cols-2 gap-3">
+        {PRO_PACKS.map((p, i) => {
+          // Another pack adds hours to the one running, so the owner of a pack
+          // is offered more time rather than a second identical card.
+          const owned = current === p.id;
+          const look = PACK_LOOK[p.id] ?? PACK_LOOK.pack_light;
+          return (
+            <motion.section key={p.id} data-pack={p.id} aria-label={p.name} className="api-tier api-tier-card" {...arrive(i)}>
+              <TierBand mesh={look.mesh} pattern={look.pattern} name={p.name} badge={owned ? 'Your pack' : undefined} />
+              <div className="api-tier-well">
+                <p className="api-tier-blurb">{look.blurb}</p>
+                <p className="api-tier-price">
+                  {/* The plans' odometer, still here: it sets the same line height, so a pack and a plan match. */}
+                  <span className="api-tier-amount"><RollingPrice price={`$${p.price}`} from={`$${p.price}`} /></span>
+                  <span className="api-tier-per">once</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onBuy(urls[p.id])}
+                  aria-label={`${owned ? 'Add hours with' : 'Buy'} the ${p.name}, $${p.price} once. Opens checkout`}
+                  className="api-tier-cta"
+                >
+                  {owned ? 'Add hours' : `Buy ${p.name}`} <ArrowUpRight size={14} strokeWidth={1.75} aria-hidden="true" />
+                </button>
+              </div>
+              <ul className="api-tier-tray">
+                <li><Check size={14} strokeWidth={2} aria-hidden="true" /><span><b>{p.hours} hours</b> of live meetings</span></li>
+                <li><Check size={14} strokeWidth={2} aria-hidden="true" /><span>Use within <b>{p.days} days</b></span></li>
+                {/* Four lines and a two-line blurb, like a plan card, so a pack
+                    stands exactly as tall when Hourly swaps them (Evin, 2026-11-10). */}
+                <li><Check size={14} strokeWidth={2} aria-hidden="true" /><span>AI, transcription and search</span></li>
+                <li><Check size={14} strokeWidth={2} aria-hidden="true" /><span>Natively Pro features</span></li>
+              </ul>
+            </motion.section>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-text-tertiary px-1 mt-2 leading-snug">
+        Pay once, nothing renews. A pack ends when its hours or days run out. More packs add hours.
+      </p>
+      <p data-pack-provider-rule className="text-[11px] text-text-tertiary px-1 leading-snug">
+        Pro works only while AI and transcription both use Natively API. Switch either to another provider and Pro turns off;
+        the pack still covers the part on Natively API.
+      </p>
+      {/* What buying a pack does to THIS key (natively-api lib/planChange.js). */}
+      {changeNote && <p data-plan-change-note className="text-[11px] text-text-tertiary px-1 leading-snug">{changeNote}</p>}
+    </div>
+  );
+}
+
+// ─── Pack meeting time ───────────────────────────────────────
+// A pack is sold in hours of meetings, so that is its first row: time left
+// against time bought. Same markup as ResourceMeter's bar so it reads as one
+// of the card's rows.
+function PackMeetingTime({ status }: { status: PackStatus }) {
+  const left = status.secondsLeft;
+  const isHigh = status.hoursKnown && status.usedPercent >= 80;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Clock size={12} className="text-text-tertiary" strokeWidth={1.75} />
+          <span className="text-[12px] text-text-secondary truncate">Meeting time</span>
+        </div>
+        <span className={`text-[12px] tabular-nums shrink-0 ${isHigh || status.ended ? 'text-amber-500 font-medium' : 'text-text-tertiary'}`}>
+          {status.ended
+            ? (status.endedReason === 'hours_used' ? 'Hours used up' : 'Pack ended')
+            : status.hoursKnown && left != null
+              ? `${formatMeetingTime(left)} left of ${formatMeetingTime(status.secondsTotal)}`
+              : 'Until the use-by date'}
+        </span>
+      </div>
+      {status.hoursKnown && (
+        <div className="h-[6px] natively-meter-track">
+          <div
+            className={`natively-meter-fill transition-[width] duration-700 ease-out motion-reduce:transition-none ${
+              status.ended || status.usedPercent >= 100 ? 'natively-meter-fill--over' : isHigh ? 'natively-meter-fill--high' : ''
+            }`}
+            style={{ width: `${status.usedPercent}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Price ───────────────────────────────────────────────────
+// The dominant element on a plan row: visibly larger and heavier than the
+// plan name (19px semibold vs 13px medium). It previously sat at 17px bold
+// against a 13px semibold name — near-parity, so nothing led.
+function Price({ amount, period }: { amount: string; period: string }) {
+  return (
+    <div className="flex items-baseline gap-1 shrink-0">
+      <span
+        className="text-[19px] font-semibold text-text-primary tabular-nums"
+        style={{ letterSpacing: '-0.025em' }}
+      >
+        {amount}
+      </span>
+      <span className="text-[11px] text-text-tertiary">{period}</span>
+    </div>
+  );
+}
+
+// ─── Component ───────────────────────────────────────────────
+interface NativelyApiSettingsProps {
+  initialIsSaved?: boolean;
+  /**
+   * Rendered between the Natively key card and the plan chooser. A slot exists
+   * because that seam is INSIDE this component, so a parent cannot reach it by
+   * reordering siblings. Used by PlansSettings to place the "Pro License
+   * Active" receipt directly under the credential box it relates to, rather
+   * than above the whole section or stranded below the pricing.
+   */
+  afterKeySection?: React.ReactNode;
+}
+
+export const NativelyApiSettings: React.FC<NativelyApiSettingsProps> = ({ initialIsSaved = false, afterKeySection }) => {
+  const prefersReducedMotion = useReducedMotion();
+  const t = useT();
+  // `initialIsSaved` arrives ASYNCHRONOUSLY. SettingsOverlay seeds its own
+  // `hasNativelyKey` to false and only flips it after `getStoredCredentials()`
+  // resolves, so on every open of this tab the first render says "no key" even
+  // for a subscriber. That is what made the Usage section flash: `usageData`
+  // was correctly restored from `usageCache` on the very first render, but the
+  // card is gated on `isSaved && usageData`, so it stayed hidden until the
+  // credentials round-trip landed and then popped in. The plan chooser
+  // (`!isSaved && PlansCard`) flashed the other way for the same reason.
+  //
+  // A populated `usageCache` is itself proof a key was saved: it is only ever
+  // written from a successful quota fetch, and it is nulled on BOTH removal
+  // paths (`handleClear`, and the credentials effect when no key comes back).
+  // So seeding these three from the cache is sound, and it makes the first
+  // paint of a revisit identical to the last paint of the previous visit.
+  const cachedKeyKnown = !!usageCache;
+  const [apiKey, setApiKey] = useState(() => (initialIsSaved || cachedKeyKnown ? MASKED_NATIVELY_KEY : ''));
+  const [isSaved, setIsSaved] = useState(initialIsSaved || cachedKeyKnown);
+  // "Lost your key?" (KeyResendHelp): hidden until asked for.
+  const [resendOpen, setResendOpen] = useState(false);
+  const resendLinkRef = useRef<HTMLButtonElement>(null);
+  const [isLoading, setIsLoading] = useState(!(initialIsSaved || cachedKeyKnown));
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The key saved and its plan includes Pro, but Pro could not be confirmed yet
+  // (server unwell). The main process keeps retrying; this just says so, instead
+  // of showing a plan card with no Pro and no explanation (support, 2026-09-22).
+  const [proNotice, setProNotice] = useState<string | null>(null);
+  // The connection check found something it could not fix: offer the opt-in report.
+  const [diagOffer, setDiagOffer] = useState(false);
+  // The retry succeeded in the background — the notice has done its job.
+  useEffect(() => {
+    const off = window.electronAPI?.onLicenseStatusChanged?.((d) => { if (d?.isPremium) { setProNotice(null); setDiagOffer(false); } });
+    // The connection check (main/connectivityWatcher) found why Natively could not
+    // be reached: say it in the same place, in plain words. A healed connection
+    // needs no notice; Pro turns on by itself.
+    // A finding that arrived while this panel was closed.
+    void window.electronAPI?.getLastConnectionNotice?.().then((d) => {
+      if (d && !d.healed && d.verdict !== 'reachable') { setProNotice((cur) => cur ?? d.message); setDiagOffer(true); }
+    }).catch(() => {});
+    const offDiag = window.electronAPI?.onConnectDiagnosis?.((d) => {
+      if (d && !d.healed && d.verdict !== 'reachable') { setProNotice(d.message); setDiagOffer(true); }
+    });
+    return () => { off?.(); offDiag?.(); };
+  }, []);
+  const [justSaved, setJustSaved] = useState(false);
+  // Distinct from justSaved: a Dodo/Gumroad license key activates Pro but
+  // writes nothing to CredentialsManager — isSaved/fetchUsage must never
+  // fire for this branch, or the UI shows a "Connected" badge with an empty
+  // Usage card for a credential that was never actually stored.
+  const [justActivatedPro, setJustActivatedPro] = useState(false);
+  const [usageData, setUsageData] = useState<UsageData | null>(() => usageCache);
+  const [isLoadingUsage, setIsLoadingUsage] = useState(false);
+  const [planCatalog, setPlanCatalog] = useState<Record<string, NativelyPlanLimits> | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>('natively_api_pro_monthly');
+  const [prevPlanId, setPrevPlanId] = useState<string>('natively_api_pro_monthly');
+  // Selection is purely manual now — the tier selector used to auto-rotate
+  // through Standard/Pro/Max/Ultra every 4.5s via setInterval, which reads
+  // fine as a marketing carousel but fights a "calm once loaded" settings
+  // page: content shifting under a user's cursor while they're trying to
+  // read is disorienting, and it recreates itself every time this tab is
+  // revisited (module state doesn't survive the SettingsOverlay unmount).
+
+  // Monthly / Yearly on the tier card. Monthly by default; a yearly subscriber
+  // opens on Yearly so their own plan reads as the active one.
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>(
+    () => (usageCache?.billing_period === 'yearly' ? 'yearly' : 'monthly'),
+  );
+  const keyBillingPeriod = usageData?.billing_period;
+  useEffect(() => {
+    if (keyBillingPeriod === 'yearly') setBillingCycle('yearly');
+  }, [keyBillingPeriod]);
+  // Yearly prices take turns, all four cards together: "$20.83 / month",
+  // then "$250 / year" (Evin, 2026-11-16). Each turn starts on the monthly
+  // share; it waits while the window is hidden.
+  const [yearlyFace, setYearlyFace] = useState<'month' | 'year'>('month');
+  useEffect(() => {
+    setYearlyFace('month');
+    if (billingCycle !== 'yearly') return;
+    const id = window.setInterval(() => {
+      if (!document.hidden) setYearlyFace((f) => (f === 'month' ? 'year' : 'month'));
+    }, YEARLY_FACE_MS);
+    return () => window.clearInterval(id);
+  }, [billingCycle]);
+  // Funnel (plans_visit): the switch's value, and again at each visit's start
+  // so a visit knows what it opened on. Only a press on the switch counts as
+  // a switch (onChange below); the move to Yearly for a yearly key does not.
+  // Hourly on the same switch shows the two Pro packs in the plans' place, as
+  // the website's pricing page does (Evin, 2026-11-10). A pack key opens on it.
+  const [packsView, setPacksView] = useState<boolean>(() => isPackPlan(usageCache?.plan));
+  const plansView: PlansView = packsView ? 'hourly' : billingCycle;
+  // Cards only dissolve in after a press on the switch, never on first paint.
+  const [viewSwitched, setViewSwitched] = useState(false);
+  const choosePlansView = (next: PlansView) => {
+    if (next === plansView) return;
+    if (next === 'hourly') {
+      setViewSwitched(true);
+      setPacksView(true);
+      return;
+    }
+    if (packsView) setViewSwitched(true);
+    setPacksView(false);
+    plansVisit.cycleSwitched(next);
+    setBillingCycle(next);
+  };
+  const billingCycleRef = useRef(billingCycle);
+  billingCycleRef.current = billingCycle;
+  useEffect(() => { plansVisit.cycle(billingCycle); }, [billingCycle]);
+  useEffect(() => plansVisit.onStart(() => plansVisit.cycle(billingCycleRef.current)), []);
+
+  const selectPlan = useCallback((newPlanId: string) => {
+    setSelectedPlanId(prev => {
+      setPrevPlanId(prev);
+      return newPlanId;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (usageData?.plan) {
+      const planName = usageData.plan.toLowerCase();
+      if (planName === 'starter' || planName === 'standard') {
+        selectPlan('natively_api_standard_monthly');
+      } else if (planName === 'pro') {
+        selectPlan('natively_api_pro_monthly');
+      } else if (planName === 'max') {
+        selectPlan('natively_api_max_monthly');
+      } else if (planName === 'ultra') {
+        selectPlan('natively_api_ultra_monthly');
+      }
+    }
+  }, [usageData, selectPlan]);
+
+  const [interfaceTheme, setInterfaceTheme] = useState<MeetingInterfaceTheme>(() => {
+    const theme = getMeetingInterfaceTheme();
+    return theme === 'default' ? 'liquid-glass' : theme;
+  });
+
+  useEffect(() => {
+    const handleStorage = () => {
+      const theme = getMeetingInterfaceTheme();
+      setInterfaceTheme(theme === 'default' ? 'liquid-glass' : theme);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  // ── Free Trial state ──────────────────────────────────────
+  const [trialState, setTrialState] = useState<{
+    active: boolean;
+    expired: boolean;
+    expiresAt: string;
+    startedAt: string;
+    usage: TrialUsage;
+    /** The trial's own allowances, from the server. Absent until /trial/status answers. */
+    limits?: TrialLimits;
+  } | null>(null);
+  // True while getLocalTrial is in flight — prevents the "start trial" card
+  // from flashing before we know whether a trial token exists.
+  const [isCheckingTrial, setIsCheckingTrial] = useState(true);
+  const [trialLoading, setTrialLoading] = useState(false);
+  const [trialError, setTrialError] = useState<string | null>(null);
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  // Read by the trial-ended listener, which is registered once.
+  const showTrialModalRef = useRef(showTrialModal);
+  showTrialModalRef.current = showTrialModal;
+
+  // The offer's gate, and its process memo (see trialOfferLastSettled).
+  const trialSettling = isLoading || isCheckingTrial;
+  const trialClaimed =
+    trialState?.expired === true || isTrialClaimedLocally(localStorage);
+  const trialOfferSettled =
+    !isSaved && (!trialState || (trialState.expired && !trialState.active)) && !trialClaimed;
+  const showTrialOffer = trialSettling ? trialOfferLastSettled && !isSaved && !trialClaimed : trialOfferSettled;
+  useEffect(() => {
+    if (!trialSettling) trialOfferLastSettled = trialOfferSettled;
+  }, [trialSettling, trialOfferSettled]);
+
+  // One shake per failure, on the field that was wrong: transitions.dev
+  // "error state shake", the .t-notice-shake keyframes Settings' alerts use
+  // (dropped under reduced motion). remove -> reflow -> add replays it; a retry
+  // that fails with the SAME message still shakes, because handleSave and
+  // handleActivatePro clear `error` before they await.
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = keyInputRef.current;
+    if (!error || !el) return;
+    el.classList.remove('t-notice-shake');
+    void el.offsetWidth;
+    el.classList.add('t-notice-shake');
+  }, [error]);
+  const trialPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const creds = await window.electronAPI.getStoredCredentials();
+        if (creds.hasNativelyKey) {
+          setApiKey(MASKED_NATIVELY_KEY);
+          setIsSaved(true);
+        } else {
+          setApiKey('');
+          setIsSaved(false);
+          setUsageCache(null);
+          setUsageData(null);
+        }
+      } catch (e) {
+        console.error('[NativelyApi]', e);
+        // Unknown is not saved. `isSaved` now starts optimistically true when a
+        // persisted usage entry exists, so without this a keychain read failure
+        // would leave a masked key in the field with no way out: `handleSave`
+        // refuses any value containing '•', so the Activate button would
+        // silently no-op. Falling back to the empty state keeps the input
+        // usable.
+        setApiKey('');
+        setIsSaved(false);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, []);
+
+  // `silent`: revalidate in the background without the loading spinner —
+  // used when the tab re-appears and we already have last-known numbers on
+  // screen. The manual Refresh button stays non-silent so an explicit click
+  // still shows explicit spinner feedback. Either way, a failure (no quota,
+  // inactive subscription, network error) just leaves the Usage card hidden
+  // — see the `isSaved && usageData` render gate below — rather than
+  // surfacing an error card, since a saved-but-not-a-valid-API-plan key is
+  // an expected state (e.g. it's actually a Pro-only license), not a fault.
+  const fetchUsage = useCallback(async (opts: { force?: boolean; silent?: boolean } = {}) => {
+    const { force = false, silent = false } = opts;
+    if (!silent) setIsLoadingUsage(true);
+    try {
+      // The SAVED key's plan: a pack standing in for it has its own row.
+      const r = await window.electronAPI.getNativelyUsage(force, 'main');
+      // Normalized at the boundary, once, so every component below reads one
+      // shape — including when the server is a build older than this one.
+      const quota = r.ok ? normalizeQuota(r.quota) : null;
+      if (quota) {
+        const next = { ...r, quota } as UsageData;
+        setUsageCache(next);
+        setUsageData(next);
+      } else {
+        // A pack that has run out is refused like a switched-off key. Show it
+        // as ended ("Hours used up", Add hours on its card) over the last
+        // numbers, never the last numbers alone under a live-looking badge.
+        const ended = endedPackFromRefusal(r, usageCache);
+        if (ended) {
+          // No earlier answer this session (the app started after the pack
+          // ended): no meters to show, only the pack. Not normalizeQuota of an
+          // empty object, which is null for a quota with no meters; the card reads
+          // `quota.ai`. Every meter renders nothing when absent. readUsageCache
+          // drops this meter-less entry on the next launch, so it is refetched.
+          const base: UsageData = usageCache ?? {
+            plan: ended.plan ?? 'pack_light',
+            member_since: '',
+            quota: { resets_at: '' } as unknown as NativelyQuota,
+          };
+          const next: UsageData = {
+            ...base,
+            plan: ended.plan ?? base.plan,
+            billing_period: 'pack',
+            pack: ended.pack as UsageData['pack'],
+          };
+          setUsageCache(next);
+          setUsageData(next);
+        }
+      }
+    } catch {
+      // no-op — see comment above
+    } finally {
+      if (!silent) setIsLoadingUsage(false);
+    }
+  }, []);
+
+  // The meeting clock found the pack used up, or its hours back: re-read it now
+  // rather than when this tab is next opened.
+  useEffect(() => {
+    const refresh = () => { void fetchUsage({ force: true, silent: true }); };
+    const off = window.electronAPI?.onPackEnded?.(refresh);
+    // Hours added mid-meeting: the ended card goes back to the live pack.
+    const offRenewed = window.electronAPI?.onPackRenewed?.(refresh);
+    return () => { off?.(); offRenewed?.(); };
+  }, [fetchUsage]);
+
+  useEffect(() => {
+    if (!isSaved || isLoading) return;
+    // First-ever load in this session (no cache yet) shows the spinner and
+    // surfaces errors normally. A re-visit with cached numbers already on
+    // screen instead revalidates silently in the background — the whole
+    // point being the user never sees a loading state for data they've
+    // already seen once this session.
+    fetchUsage({ force: true, silent: !!usageCache });
+  }, [isSaved, isLoading, fetchUsage]);
+
+  // The plan catalog — allowances and prices as the server enforces them.
+  //
+  // Unauthenticated and cached for 15 minutes in the main process, so this is
+  // cheap and runs whether or not a key is saved: the person who most needs to
+  // see what each tier includes is the one who has not bought yet.
+  useEffect(() => {
+    window.electronAPI?.getNativelyPlans?.()
+      .then((res) => {
+        if (res?.ok && res.plans) setPlanCatalog(res.plans);
+      })
+      .catch(() => { /* the cards fall back to their qualitative copy */ });
+  }, []);
+
+  // ── Trial init + polling ──────────────────────────────────
+  const refreshTrial = useCallback(async () => {
+    const res = await window.electronAPI?.getTrialStatus?.();
+    if (!res?.ok) return;
+
+    markTrialClaimedLocally(localStorage);
+
+    setTrialState({
+      active: !(res.expired ?? false),
+      expired: res.expired ?? false,
+      expiresAt: res.expires_at ?? '',
+      startedAt: res.started_at ?? '',
+      usage: res.usage ?? { ai: 0, ai_tokens: 0, stt_seconds: 0, search: 0 },
+      // Carried rather than hardcoded: the pills below used to compare against
+      // literal 10 / 10m / 2, which is three numbers to miss when the trial is
+      // resized — and the AI one is now denominated in tokens, not requests.
+      limits: (res as { limits?: TrialLimits }).limits,
+    });
+    if (res.expired) {
+      // The Trial ended card has one host, the launcher (App.tsx): opening a
+      // second copy here put two on screen (toaster policy §5 row 3).
+      if (trialPollRef.current) {
+        clearInterval(trialPollRef.current);
+        trialPollRef.current = null;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // On mount: read local trial token (no network) to determine initial render state,
+    // then fetch live usage from server. Setting trialState from local data first
+    // prevents the "start trial" card from flashing while the server call is in flight.
+    (async () => {
+      try {
+        const local = await window.electronAPI?.getLocalTrial?.();
+        if (!local?.hasToken) {
+          if (local?.trialClaimed) markTrialClaimedLocally(localStorage);
+          return;
+        }
+
+        markTrialClaimedLocally(localStorage);
+
+        if (local.expired) {
+          // Token exists but expired locally — show modal immediately, confirm via server
+          setTrialState({
+            active: false,
+            expired: true,
+            expiresAt: local.expiresAt ?? '',
+            startedAt: local.startedAt ?? '',
+            usage: { ai: 0, ai_tokens: 0, stt_seconds: 0, search: 0 },
+          });
+          // The Trial ended card itself is the launcher's (App.tsx), not this pane's.
+          refreshTrial(); // updates usage counters
+          return;
+        }
+
+        // Set optimistic active state immediately from local data so the correct
+        // card renders before the server responds (prevents start-card flash).
+        // Usage counters start at 0 and are replaced by refreshTrial below.
+        setTrialState({
+          active: true,
+          expired: false,
+          expiresAt: local.expiresAt ?? '',
+          startedAt: local.startedAt ?? '',
+          usage: { ai: 0, ai_tokens: 0, stt_seconds: 0, search: 0 },
+        });
+
+        // Fetch live usage + start 15s polling (was 30s — halved so counters
+        // feel more responsive during an active session).
+        refreshTrial();
+        trialPollRef.current = setInterval(refreshTrial, 15_000);
+      } finally {
+        setIsCheckingTrial(false);
+      }
+    })();
+    return () => {
+      if (trialPollRef.current) clearInterval(trialPollRef.current);
+    };
+  }, [refreshTrial]);
+
+  // Main ends the trial in two places this panel does not drive: storing a real
+  // Natively key (the purchase path, which can also be a key saved from the box
+  // above) and the BYOK exit. Without this the panel kept its own trialState and
+  // went on rendering "Free trial active" — with a live countdown — beside the
+  // key that had just superseded it.
+  useEffect(() => {
+    const off = window.electronAPI?.onTrialEnded?.((data) => {
+      if (trialPollRef.current) {
+        clearInterval(trialPollRef.current);
+        trialPollRef.current = null;
+      }
+      // The options card's own BYOK exit is announced while it is still
+      // Cleaning up; it finishes itself (handleTrialDone).
+      if (data?.choice === 'byok' && showTrialModalRef.current) return;
+      setTrialState(null);
+      setShowTrialModal(false);
+    });
+    return () => off?.();
+  }, []);
+
+  const handleStartTrial = async () => {
+    setTrialLoading(true);
+    setTrialError(null);
+    try {
+      const res = await window.electronAPI?.startTrial?.('api_settings');
+      // A trial that started but could not be written to disk is the failure
+      // behind "I pressed Start and got nothing": the server has spent this
+      // machine's one-per-hwid row either way, so say what happened rather
+      // than showing a card that looks untouched. The trial IS live for this
+      // session; only a restart loses it, and pressing Start again from a
+      // healthy session re-issues the same one (the API is idempotent).
+      if (res?.ok && res.persisted === false) {
+        setTrialError(
+          'Trial started, but it could not be saved — your credential store is locked, so it will end when you quit. '
+          + 'Reopen the app with your keychain unlocked and press Start again to keep it.',
+        );
+      }
+      if (!res?.ok) {
+        // Every refusal is a sentence, never the code (F-601 follow-up), and
+        // none of them is remembered against the device. "Too many trials from
+        // this network" and "too many attempts this hour" used to be recorded
+        // here as a used trial: the pane showed a trial that had ended for a
+        // device that never had one and would get one at home the next day.
+        setTrialError(trialRefusal(res?.error).message);
+        return;
+      }
+
+      markTrialClaimedLocally(localStorage);
+
+      if (res.already_used && res.expired) {
+        setTrialState({
+          active: false,
+          expired: true,
+          expiresAt: '',
+          startedAt: '',
+          usage: { ai: 0, ai_tokens: 0, stt_seconds: 0, search: 0 },
+        });
+        return;
+      }
+      setTrialState({
+        active: !(res.expired ?? false),
+        expired: res.expired ?? false,
+        expiresAt: res.expires_at ?? '',
+        startedAt: res.started_at ?? '',
+        usage: res.usage ?? { ai: 0, stt_seconds: 0, search: 0 },
+      });
+      if (!res.expired) {
+        trialPollRef.current = setInterval(refreshTrial, 30_000);
+      }
+    } catch (e: any) {
+      setTrialError(e.message || 'Network error');
+    } finally {
+      setTrialLoading(false);
+    }
+  };
+
+  const handleByok = async (opts?: { force?: boolean }) => {
+    // Only wipe — modal transitions to DoneState, then onDone closes it. A wipe
+    // that did not finish throws, so the card shows Try again, not "All set".
+    const res = await window.electronAPI?.endTrialByok?.(opts);
+    if (!res?.success) throw new Error('wipe_failed');
+    return { wipeIncomplete: !!res.wipeIncomplete };
+  };
+
+  // Closing the options card is NOT the same as ending the trial. This cleared
+  // trialState unconditionally, so opening "See your options" on a live trial
+  // and closing it again wiped the active-trial card and its countdown — the
+  // trial read as ended on the spot, with minutes still on the clock. Only the
+  // deliberate BYOK exit ends anything; the modal reports which happened.
+  const handleTrialDone = (reason: 'byok' | 'dismissed' = 'byok') => {
+    if (reason === 'byok') setTrialState(null);
+    setShowTrialModal(false);
+    // "Add my keys": the keys live on AI Providers.
+    if (reason === 'byok') window.electronAPI?.openSettingsTab?.('ai-providers');
+  };
+
+  // Single box, two credential types. A Natively API key (`natively_sk_...`)
+  // is saved via CredentialsManager and already auto-activates Pro server-side
+  // when the plan qualifies (ipcHandlers.ts `set-natively-api-key`). Anything
+  // else is treated as a Dodo/Gumroad Pro license key and goes through
+  // licenseActivate instead — that path activates Pro but does NOT write an
+  // API credential, so it must stay on its own success state, never isSaved.
+  // Default to licenseActivate for anything that isn't the known API-key
+  // prefix, rather than trying to pattern-match the license-key shape — an
+  // API key misrouted to licenseActivate reproduces a known half-activation
+  // bug (Pro on, no credentials stored, no usage tracking), which is worse
+  // than a license key misrouted the other way.
+  // A pack key held beside the saved monthly/yearly key (2026-11-17): its own
+  // row under the saved key's, and its own usage read. Main process decides
+  // when it is in use (services/packs/nativelyPackFallback.ts).
+  const [heldPack, setHeldPack] = useState<{ state: NativelyPackKeyState; usage: any } | null>(null);
+  const fetchHeldPack = useCallback(async (force = false) => {
+    const api = window.electronAPI;
+    if (!api?.getNativelyPackKey) return;
+    const state = await api.getNativelyPackKey().catch(() => null);
+    if (!state?.held) { setHeldPack(null); return; }
+    const usage = await api.getNativelyUsage(force, 'pack').catch(() => null);
+    setHeldPack({ state, usage });
+  }, []);
+  useEffect(() => {
+    void fetchHeldPack();
+    const off = window.electronAPI?.onNativelyPackFallbackChanged?.(() => {
+      void fetchHeldPack(true);
+      void fetchUsage({ force: true, silent: true });
+    });
+    return () => { off?.(); };
+  }, [fetchHeldPack, fetchUsage]);
+  const removeHeldPack = async () => {
+    const r = await window.electronAPI?.removeNativelyPackKey?.().catch(() => null);
+    if (r?.ok) setHeldPack(null);
+  };
+
+  const handleSave = async () => {
+    const trimmed = apiKey.trim();
+    if (!trimmed || apiKey.includes('•')) return;
+    if (!trimmed.startsWith('natively_sk_')) {
+      return activateProLicense(trimmed);
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      const r = await window.electronAPI.setNativelyApiKey(trimmed);
+      if (r.success) {
+        setProNotice(
+          r.proPending
+            ? 'Key saved. We couldn’t confirm Natively Pro just now — the app will keep trying and turn it on automatically.'
+            : null,
+        );
+        setApiKey('•'.repeat(24));
+        setIsSaved(true);
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 2500);
+        // A pack key held beside the plan's key (or a plan key that now holds
+        // the pack): the row under the key shows it.
+        void fetchHeldPack(true);
+        // NOTE: do NOT also call setDefaultModel('natively') / setSttProvider('natively')
+        // here. The main-process `set-natively-api-key` handler already auto-promotes
+        // both the default model and the STT provider server-side (see
+        // CredentialsManager.setNativelyApiKey) and runs reconfigureSttProvider once.
+        // Firing those extra IPCs raced a SECOND audio-pipeline rebuild against the
+        // first, which deadlocked/crashed the native audio stack right after a key
+        // save (the "app hangs after entering the key" bug, macOS + Windows).
+      } else {
+        setError(r.error || 'Failed to save API key');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Unexpected error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const activateProLicense = async (key: string) => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const r = await window.electronAPI?.licenseActivate?.(key);
+      if (r?.success) {
+        setApiKey('');
+        setJustActivatedPro(true);
+        setTimeout(() => setJustActivatedPro(false), 2500);
+        // Intentionally does not touch isSaved/fetchUsage — no API
+        // credential was written, so there is no usage to fetch and no
+        // "Connected" badge to show.
+      } else {
+        setError(r?.error || 'Activation failed. Please try again.');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Activation failed.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // The Usage card is the one region that CANNOT be put on a fixed schedule:
+  // its data comes from the network, so on activation `isSaved` flips, the plan
+  // chooser starts leaving, `fetchUsage` fires, and the quota lands some
+  // variable time later. A plain delay would fire before the data exists on a
+  // cold fetch and the card would then pop in with no animation at all.
+  //
+  // So the layout sequence stays driven by `isSaved`, and this card spends
+  // whatever is LEFT of its scheduled slot when its data actually arrives:
+  //   * warm `usageCache` (persisted across restarts) — elapsed ≈ 0, so it takes
+  //     the full 140ms and lands in its choreographed slot, crossing the
+  //     chooser's collapse exactly as designed;
+  //   * cold fetch at 800ms — the slot is long gone, delay clamps to 0, and it
+  //     animates in the instant the numbers land, which reads as "the data just
+  //     arrived" because that is what happened;
+  //   * fetch fails — nothing appears, per the existing decision at the render
+  //     gate below that a saved-but-planless key is an expected state.
+  // Same curve and duration in every case, so a slow network degrades to a late
+  // animation, never to a cut.
+  const usageArmedAtRef = useRef<number | null>(null);
+  if (isSaved) { if (usageArmedAtRef.current === null) usageArmedAtRef.current = performance.now(); }
+  else usageArmedAtRef.current = null;
+
+  const usageDelay = (slot: number) =>
+    usageArmedAtRef.current === null
+      ? 0
+      : Math.max(0, slot - (performance.now() - usageArmedAtRef.current) / 1000);
+
+  const clearingRef = useRef(false);
+
+  const handleClear = async () => {
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    const prevKey = apiKey;
+    // Optimistic ON PURPOSE, and it needs no spinner: unlike Deactivate — whose
+    // only visible effect was a card vanishing after an await, so the wait was
+    // dead air — this immediately moves four regions of the page. That layout
+    // change IS the feedback, and a spinner would only delay it.
+    //
+    // What was actually wrong here is that failure was unobservable. This call
+    // also revokes the bundled Pro licence (ipcHandlers.ts:6380), and it used to
+    // be fired un-awaited into `.catch(() => {})`. If it rejected, the key was
+    // still saved in main, Pro was still active, and the user was looking at a
+    // UI that had animated a removal which never happened.
+    //
+    // `usageData` is deliberately NOT cleared here — see the Usage card's
+    // AnimatePresence below, which cannot play an exit for a child whose data
+    // has already gone.
+    setApiKey('');
+    setIsSaved(false);
+    setError(null);
+    setUsageCache(null);
+    try {
+      await window.electronAPI.setNativelyApiKey('');
+      // A held pack key becomes the saved key when the plan's key is removed
+      // (set-natively-api-key does it): show it as saved, not as no key.
+      if (heldPack?.state.held) {
+        setHeldPack(null);
+        setApiKey('•'.repeat(24));
+        setIsSaved(true);
+        void fetchUsage({ force: true });
+      }
+    } catch (e: any) {
+      // The entrance/exit are declarative on `isSaved`, so the rollback animates
+      // back in on the same curves without any extra work.
+      setApiKey(prevKey);
+      setIsSaved(true);
+      setError(e?.message || 'Could not remove the key — it is still saved.');
+    } finally {
+      clearingRef.current = false;
+    }
+  };
+
+  // Set when a checkout was opened from here: the next time this window gets
+  // focus back the plan is re-read, so a finished purchase shows at once (the
+  // key does not change, so nothing else would prompt a refresh).
+  const checkoutOpenedRef = useRef(false);
+  // Set while a checkout link is being signed (up to 2.5 s). A second click in
+  // that time is ignored: two checkout tabs paid twice are two charges.
+  const checkoutPendingRef = useRef(false);
+  // A yearly plan moving up a yearly tier in place: first click asks what it
+  // costs (nothing charged), second click pays exactly that.
+  const [yearlyUp, setYearlyUp] = useState<{ plan: string; amount?: number; currency?: string; busy?: boolean; done?: boolean; error?: string } | null>(null);
+  const yearlyUpgrade = async (planId: string) => {
+    const api = window.electronAPI?.nativelyYearlyUpgrade;
+    if (!api || yearlyUp?.busy) return;
+    const confirming = yearlyUp?.plan === planId && typeof yearlyUp.amount === 'number' && !yearlyUp.error;
+    setYearlyUp({ ...(yearlyUp?.plan === planId ? yearlyUp : {}), plan: planId, busy: true, error: undefined });
+    const r = await api(planId, confirming ? yearlyUp!.amount : undefined).catch(() => ({ ok: false, error: 'network_error' } as const));
+    const preview = 'preview' in r ? r.preview : null;
+    if (r.ok && 'changed' in r && r.changed) {
+      setYearlyUp({ plan: planId, done: true });
+      // The key moves when Dodo's plan_changed webhook reaches the server.
+      setTimeout(() => { void fetchUsage({ force: true, silent: true }); }, 4_000);
+      return;
+    }
+    if (r.ok && preview) { setYearlyUp({ plan: planId, amount: preview.amount, currency: preview.currency }); return; }
+    // amount_changed answers the new amount: show it, ask again.
+    setYearlyUp({ plan: planId, amount: preview?.amount, currency: preview?.currency, error: r.error || 'failed' });
+  };
+  const openExternal = (url: string, family: 'pack' | 'plan' = 'plan') => {
+    const open = (target: string) => (window.electronAPI as any)?.openExternal?.(target, { surface: 'api_settings' });
+    if (!isCheckoutUrl(url) || !isSaved || !window.electronAPI?.getNativelyUpgradeLink) { plansVisit.opened(url); open(url); return; }
+    if (checkoutPendingRef.current) return;
+    checkoutPendingRef.current = true;
+    plansVisit.opened(url); // plans_visit counts it when it is a checkout link
+    checkoutOpenedRef.current = true;
+    // The signed token puts the purchase on THIS key even with another email.
+    // Any failure (offline, older server) opens the plain link; the server then
+    // matches the purchase by email.
+    window.electronAPI.getNativelyUpgradeLink(family)
+      .then((link) => open(withUpgradeLink(url, link)))
+      .catch(() => open(url))
+      .finally(() => { checkoutPendingRef.current = false; });
+  };
+  useEffect(() => {
+    const onFocus = () => {
+      if (!checkoutOpenedRef.current) return;
+      checkoutOpenedRef.current = false;
+      void fetchUsage({ force: true, silent: true });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [fetchUsage]);
+
+  const isDirty = apiKey.length > 0 && !apiKey.includes('•') && !isSaved;
+  // "Pro", "Light pack" (pack_light), and "Pro · yearly" for a yearly key.
+  const planName = apiPlanLabel(usageData?.plan);
+  const planLabel = planName && usageData?.billing_period === 'yearly' ? `${planName} · yearly` : planName;
+  const keyPack = usageData && (usageData.billing_period === 'pack' || isPackPlan(usageData.plan))
+    ? packStatus(usageData.pack)
+    : null;
+  const keyIsPack = !!usageData && (usageData.billing_period === 'pack' || isPackPlan(usageData.plan));
+  const fmtDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  const usageRefreshButton = (
+    <button
+      onClick={() => fetchUsage({ force: true })}
+      disabled={isLoadingUsage}
+      title="Refresh"
+      aria-label="Refresh usage"
+      className="flex items-center justify-center w-5 h-5 rounded-md text-text-tertiary
+                    hover:text-text-secondary transition-colors duration-150 motion-reduce:transition-none
+                    disabled:opacity-40 cursor-pointer shrink-0"
+    >
+      <RefreshCw
+        size={11}
+        className={isLoadingUsage ? 'animate-spin' : ''}
+        strokeWidth={2}
+      />
+    </button>
+  );
+
+  // A card's arrival after Hourly is switched on or off: the website's dissolve.
+  const arrive = (i: number) =>
+    !viewSwitched
+      ? {}
+      : prefersReducedMotion
+        ? { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { duration: 0.15 } }
+        : {
+            initial: DISSOLVE.from,
+            animate: { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)', transitionEnd: { filter: 'none' } },
+            transition: DISSOLVE.settle(i),
+          };
+
+  const PlansCard = (
+    // The hover handlers that used to live here only existed to pause a
+    // setInterval that auto-rotated the tier selector every 4.5s. That
+    // rotation is gone (it made the panel look like it was glitching
+    // mid-transition), so there is nothing left to pause.
+    <div className="space-y-3">
+      {/* No "Choose a Plan" label above the tier bar (removed 2026-10-24 at
+          Evin's request): the tier bar says it, and inside "Change plan" the
+          accordion's own title does. */}
+
+      {/* Monthly / Yearly. The same two-way switch as Overlay's "What meetings
+          open" (.surface-switch in index.css): one thumb sliding under two
+          labels. Centred with no note beside it: the price card's pill says
+          "2 months free" once Yearly is picked. */}
+      {/* Titled like the "Pro packs" and "Natively Pro" rows
+          below, so each group of cards on the tab has a name. */}
+      {/* Hourly | Monthly | Yearly, as on the website's pricing page: Hourly
+          shows the two Pro packs where the plans are. The title says which. */}
+      <div className="flex items-center justify-between gap-3 px-1">
+        <p className="grid text-[11px] font-medium text-text-tertiary uppercase tracking-[0.07em]">
+          {(['Natively API plans', 'Pro packs'] as const).map((label) => {
+            const on = (label === 'Pro packs') === packsView;
+            return (
+              <span
+                key={label}
+                aria-hidden={!on}
+                className="col-start-1 row-start-1"
+                style={{
+                  opacity: on ? 1 : 0,
+                  transform: on || prefersReducedMotion ? 'none' : 'translateY(4px)',
+                  filter: on || prefersReducedMotion ? 'none' : 'blur(2px)',
+                  visibility: on ? 'visible' : 'hidden',
+                  transition: prefersReducedMotion
+                    ? 'none'
+                    : `opacity 150ms ease-in-out, transform 150ms ease-in-out, filter 150ms ease-in-out, visibility 0s linear ${on ? '0s' : '150ms'}`,
+                }}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </p>
+        <BillingCycleSwitch value={plansView} onChange={choosePlansView} options={PLANS_VIEWS} showNote={false} align="start" />
+      </div>
+
+      <AnimatePresence mode="popLayout" initial={false}>
+      {packsView ? (
+        <motion.div key="packs" exit={prefersReducedMotion ? { opacity: 0, transition: { duration: 0.15 } } : DISSOLVE.leave}>
+          <ProPacks currentPlan={usageData?.plan} onBuy={(url: string) => openExternal(url, 'pack')} arrive={arrive} changeNote={isSaved && usageData ? planChangeNote(usageData, 'packs') : null} />
+        </motion.div>
+      ) : (
+      <motion.div key="plans" className="space-y-3" exit={prefersReducedMotion ? { opacity: 0, transition: { duration: 0.15 } } : DISSOLVE.leave}>
+
+      {/* All four plans as website pricing tiers, the same card and anatomy
+          as the two Pro packs below, in one sideways row that scrolls and
+          advances on its own (PlanRail). The price rolls in place when
+          Monthly / Yearly changes. */}
+      <PlanRail>
+        {PLANS.map((plan) => {
+          const yearly = billingCycle === 'yearly';
+          const price = yearly ? plan.yearlyPrice : plan.price;
+          const yearlyPerMonth = yearly ? perMonthOfYearly(plan.yearlyPrice) : null;
+          // A verified-live Dodo link (all four checked 2026-09-08); changing
+          // one is an app release. Yearly links are the 2026-11-06 products
+          // (src/config/urls.ts).
+          const checkoutUrl = yearly ? plan.yearlyUrl : plan.url;
+          const currentPlan = usageData?.plan?.toLowerCase();
+          const rowPlan = plan.name.toLowerCase();
+          // The tier AND the billing: a monthly Pro key looking at Yearly Pro is
+          // being offered something it does not have. A key from a server that
+          // predates billing_period is monthly.
+          const keyCycle = usageData?.billing_period === 'yearly' ? 'yearly' : 'monthly';
+          const isActive =
+            (currentPlan === rowPlan ||
+              (rowPlan === 'standard' && currentPlan === 'starter')) &&
+            keyCycle === billingCycle;
+          const look = TIER_LOOK[plan.planKey] ?? TIER_LOOK.standard;
+          return (
+            <motion.section
+              key={plan.id}
+              role="listitem"
+              aria-label={plan.name}
+              className="api-tier api-tier-card"
+              data-tier={plan.planKey}
+              data-active={isActive ? 'true' : 'false'}
+              {...arrive(PLANS.indexOf(plan))}
+            >
+              {/* One badge on the row: Recommended on Pro, or Your plan on the
+                  one you have. The other three tags only restated the blurb. */}
+              <TierBand
+                mesh={look.mesh}
+                pattern={look.pattern}
+                name={plan.name}
+                badge={isActive ? 'Your plan' : plan.planKey === 'pro' ? plan.badgeText : undefined}
+              />
+              <div className="api-tier-well">
+                <p className="api-tier-blurb">{plan.description}</p>
+                {/* Yearly: "$12.50 / month" and "$150 / year" take turns in
+                    one cell (yearlyFace), so the price card keeps the packs'
+                    exact layout and height (Evin, 2026-11-16). The faces
+                    swap like the section title: 4px rise, 2px blur clearing;
+                    reduced motion keeps only the fade. */}
+                {yearlyPerMonth ? (
+                  <p className="api-tier-price" style={{ display: 'grid', position: 'relative' }}>
+                    <span className="sr-only">{`${yearlyPerMonth} a month, billed ${plan.yearlyPrice} a year, ${YEARLY_MONTHS_FREE} months free`}</span>
+                    {([['month', yearlyPerMonth, '/ month'], ['year', plan.yearlyPrice, '/ year']] as const).map(([face, amount, per]) => {
+                      const on = yearlyFace === face;
+                      return (
+                        <span
+                          key={face}
+                          aria-hidden="true"
+                          data-face={face}
+                          className="col-start-1 row-start-1 flex items-baseline gap-1 min-w-0"
+                          style={{
+                            opacity: on ? 1 : 0,
+                            transform: on || prefersReducedMotion ? 'none' : 'translateY(4px)',
+                            filter: on || prefersReducedMotion ? 'none' : 'blur(2px)',
+                            transition: `opacity ${on ? 250 : 150}ms ease-in-out, transform ${on ? 250 : 150}ms ease-in-out, filter ${on ? 250 : 150}ms ease-in-out`,
+                          }}
+                        >
+                          <span className="api-tier-amount"><StaticPrice price={amount} /></span>
+                          <span className="api-tier-per">{per}</span>
+                        </span>
+                      );
+                    })}
+                    {/* Stays put while the two faces swap under it. */}
+                    <span className="api-tier-yearly-save" aria-hidden="true">{`${YEARLY_MONTHS_FREE} months free`}</span>
+                  </p>
+                ) : (
+                  <p className="api-tier-price">
+                    <span className="api-tier-amount">
+                      <RollingPrice price={price} from={price} />
+                    </span>
+                    <span className="api-tier-per">{yearly ? '/ year' : '/ month'}</span>
+                  </p>
+                )}
+                {isActive ? (
+                  <div className="api-tier-cta" data-state="active">Your current plan</div>
+                ) : isSaved && canUpgradeYearlyTo(usageData, plan.planKey, billingCycle) ? (
+                  // Up a yearly tier on the same subscription: the first press
+                  // shows the charge (nothing billed), the second pays it.
+                  <button
+                    type="button"
+                    className="api-tier-cta"
+                    data-yearly-upgrade={plan.planKey}
+                    disabled={yearlyUp?.plan === plan.planKey && (yearlyUp.busy || yearlyUp.done)}
+                    onClick={() => { void yearlyUpgrade(plan.planKey); }}
+                  >
+                    {(() => {
+                      const s = yearlyUp?.plan === plan.planKey ? yearlyUp : null;
+                      if (s?.done) return 'Upgrading…';
+                      if (s?.busy) return '…';
+                      if (s && typeof s.amount === 'number' && s.currency) {
+                        return s.error === 'amount_changed' ? `Now ${formatCharge(s.amount, s.currency)} · Pay` : `Pay ${formatCharge(s.amount, s.currency)} now`;
+                      }
+                      if (s?.error) return 'Try again';
+                      return `Upgrade to ${plan.name}`;
+                    })()}
+                  </button>
+                ) : isSaved && isYearlyLocked(usageData) ? (
+                  // A yearly plan is not changed before its year is up (the
+                  // note under the row says how to move).
+                  <div className="api-tier-cta" data-state="locked">When your year ends</div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openExternal(checkoutUrl);
+                    }}
+                    aria-label={`Get ${plan.name}, ${price} ${yearly ? 'a year' : 'a month'}. Opens checkout`}
+                    className="api-tier-cta"
+                  >
+                    Get {plan.name} <ArrowUpRight size={14} strokeWidth={1.75} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+              <ul className="api-tier-tray">
+                {plan.features.map((feature) => (
+                  <li key={feature}>
+                    <Check size={14} strokeWidth={2} aria-hidden="true" />
+                    <span>{feature}</span>
+                  </li>
+                ))}
+                {/* The one line the other three have and Standard does not,
+                    marked as missing so the cards compare at a glance. */}
+                {!plan.includesPro && (
+                  <li data-missing="true">
+                    <X size={14} strokeWidth={2} aria-hidden="true" />
+                    <span>
+                      <span className="sr-only">Not included: </span>Natively Pro features
+                    </span>
+                  </li>
+                )}
+              </ul>
+            </motion.section>
+          );
+        })}
+      </PlanRail>
+      {/* How a plan works, said once under the row, like the packs' note. */}
+      <p className="text-[11px] text-text-tertiary px-1 -mt-1 leading-snug">
+        A plan covers AI, voice, retrieval and research, with no keys of your own. Its allowance refills every
+        month{billingCycle === 'yearly' ? ', even when billed yearly' : ''}. Pro, Max and Ultra include Natively Pro.
+        Cancel anytime.
+      </p>
+      {/* What changing plan does to THIS key (natively-api lib/planChange.js). */}
+      {isSaved && usageData && (
+        <p data-plan-change-note className="text-[11px] text-text-tertiary px-1 leading-snug">
+          {planChangeNote(usageData, 'plans', billingCycle)}
+        </p>
+      )}
+      </motion.div>
+      )}
+      </AnimatePresence>
+    </div>
+  );
+
+  return (
+    // LayoutGroup so the three regions below share one layout pass. See
+    // ../../lib/plansMotion for why this whole tab is FLIP rather than resizing.
+    <LayoutGroup>
+    <div className="space-y-6 animated fadeIn" data-interface-theme={interfaceTheme}>
+      {/* Page title intentionally omitted here — PlansSettings.tsx (the parent
+          tab wrapper) already renders "Plans & Billing" as the section header.
+          A second "Natively API / Managed transcription, AI & search" title
+          directly beneath it read as two stacked, near-duplicate headers.
+          The "Connected"/plan-name badge that used to live here moved down
+          into the "Natively key" card header, where it stays visible in
+          both the saved and unsaved states without its own header row. */}
+
+      {/* ── Free Trial Modal (post-trial) ─────────────── */}
+      {showTrialModal && trialState?.active && (
+        <FreeTrialModal
+          usage={trialState.usage}
+          onByok={handleByok}
+          onDone={handleTrialDone}
+          // Set only while the trial is actually running. That turns the card
+          // from the post-trial eulogy into the options card the "See your
+          // options" button promises — and gives it a way to close that is not
+          // "end my trial". On the expired path it stays undefined, so that
+          // card is byte-for-byte what it was.
+          activeTrialExpiresAt={trialState.active ? trialState.expiresAt : undefined}
+        />
+      )}
+
+      {/* The trial region: the offer and the running trial are ONE slot. Starting
+          a trial used to cut from one card to the other; they now trade places
+          in this tab's own vocabulary (plansMotion): the leaver pops out of flow
+          and fades, the arrival takes the space at opacity 0 and inks in one
+          BEAT later. Opacity only, never size or y (PlansMotionCompositing). */}
+      <AnimatePresence mode="popLayout" initial={false}>
+      {/* ── Active trial status card ──────────────────── */}
+      {trialState?.active && (
+        <motion.div
+          key="trial-active"
+          style={{ width: '100%' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: INK.out, ease: EASE_LEAVE } }}
+          transition={{ duration: INK.in, ease: EASE_ENTER, delay: prefersReducedMotion ? 0 : BEAT }}
+        >
+        <div className="space-y-6">
+        <ActiveTrialCard
+          expiresAt={trialState.expiresAt}
+          onOptions={() => setShowTrialModal(true)}
+        />
+          {/* The usage sits under the clock, not under the plans: the card owns
+              the trial's time and this its allowance, so the two read as one
+              (Evin, 2026-11-10: it used to come after the whole plans section). */}
+          {/* ── Usage, for a TRIAL ────────────────────────────────────
+              A trial user never reached the section below: it is gated on
+              `usageData`, which comes from /v1/usage authenticated with a real
+              key, and a trial authenticates with `x-trial-token` against the
+              sentinel `__trial__` — so the whole usage table was simply absent
+              for exactly the people with the tightest allowances and the most
+              reason to watch them. The pills on the trial card show progress
+              bars; they do not show used-against-limit numbers.
+
+              Same ResourceMeter rows as the paid table, so the two read
+              identically. "this trial", not "this month": a trial does not
+              reset, it ends — the countdown for that is on the card above. */}
+          {trialState?.active && !trialState.expired && (
+            <div>
+              <SectionLabel>Usage this trial</SectionLabel>
+              <Card>
+                <div className="px-4 py-4 space-y-4">
+                  <ResourceMeter label="AI Usage" icon={Brain} meter={trialMeter(trialState.usage.ai_tokens ?? 0, trialState.limits?.ai_tokens ?? TRIAL_FALLBACK_LIMITS.ai_tokens, 'tokens')} />
+                  <ResourceMeter label="Voice Usage" icon={Mic} meter={trialMeter(Math.round(trialState.usage.stt_seconds / 60), trialState.limits?.stt_minutes ?? TRIAL_FALLBACK_LIMITS.stt_minutes, 'minutes')} />
+                  <ResourceMeter label="Research" icon={Search} meter={trialMeter(trialState.usage.search, trialState.limits?.search_requests ?? TRIAL_FALLBACK_LIMITS.search_requests, 'requests')} />
+                  {/* Knowledge only when the server actually reported it: an
+                      absent counter is an older API, not zero usage, and
+                      ResourceMeter's own rule is to render nothing rather than a
+                      confident 0%. */}
+                  {trialState.usage.embedding_tokens !== undefined && trialState.limits?.embedding_tokens ? (
+                    <ResourceMeter label="Knowledge Usage" icon={Layers} meter={trialMeter(trialState.usage.embedding_tokens, trialState.limits.embedding_tokens, 'tokens')} />
+                  ) : null}
+                </div>
+              </Card>
+            </div>
+          )}
+        </div>
+        </motion.div>
+      )}
+
+      {/* ── Free trial start card (no key, no active trial) ── */}
+      {showTrialOffer && (
+        <motion.div
+          key="trial-offer"
+          style={{ width: '100%' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: INK.out, ease: EASE_LEAVE } }}
+          transition={{ duration: INK.in, ease: EASE_ENTER, delay: prefersReducedMotion ? 0 : BEAT }}
+        >
+        {(() => {
+          const isClaimed =
+            trialState?.expired === true ||
+            isTrialClaimedLocally(localStorage);
+
+          if (isClaimed) {
+            return null;
+          }
+
+          return (
+            /* Built from this tab's OWN parts, not its own set. It used to be
+               the one container here with no section label, on a plain Card,
+               with a small right-aligned pill in flat `bg-accent-primary` —
+               the only unmaterialised saturated control on a screen where
+               every other CTA is clay (specular inset, darkened foot, lift on
+               hover). Beside the key plaque below and the pricing cards under
+               that, it read as a different product's component.
+               Now it is the key card's structure exactly: section label as the
+               heading, `natively-key-card` material, the brand mark on a 12px
+               explainer line, and one full-width `natively-key-cta`. Its own
+               ACTIVE state ("Free trial active", ~line 1301) already had this
+               shape; the two halves of one feature no longer disagree. */
+            <div>
+              <SectionLabel>Free trial</SectionLabel>
+              <Card>
+                <div className="px-4 py-4 space-y-3">
+                  {/* The ORIGINAL shape: offer on the left, one compact action
+                      on the right, a single row. It reads as an offer rather
+                      than as a form, and it keeps the card to the height of its
+                      own text — a full-width CTA under two short lines made a
+                      three-row block out of a one-line proposition.
+                      What is NOT reverted is the paint: the plaque material,
+                      the mark, the section label and the clay CTA all stay, so
+                      the shape is the old one and the language is this tab's.
+                      `items-center` because the button is the visual anchor of
+                      the row; `min-w-0 flex-1` on the text so a long
+                      translation wraps instead of shoving the button off. */}
+                  {/* No mark. The key card earns one — it is the card you go
+                      to to hand Natively a credential, and the logo is what
+                      tells you WHOSE key it wants. This card is an offer, its
+                      section label already says FREE TRIAL, and a second copy of
+                      the same logo two rows apart just repeated the brand at
+                      the reader. Losing it also puts the offer back on the
+                      card's own left edge, which is the shape this had
+                      originally. */}
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      {/* The OFFER, at title weight. This line spent one
+                          revision as `natively-key-sub` — the 12px muted role
+                          the key card uses for an explainer — which is right
+                          for "Activate with a key or a license" (a caption
+                          under a section label that already says NATIVELY KEY)
+                          and wrong here: FREE TRIAL does not tell you what you
+                          get, so this line is the heading, not a footnote, and
+                          it was disappearing.
+                          30 is a literal: the real duration is
+                          TrialLimits.duration_ms, which only arrives from
+                          /v1/trial/status once a trial EXISTS — there is
+                          nothing to read before you start one. The allowance
+                          line (tokens · voice · research) was removed on
+                          request; the trial's meters still show them once
+                          a trial is running. */}
+                      <p className="text-[15px] font-medium text-text-primary tracking-[-0.01em]">
+                        Try the Natively API free for 30 minutes
+                      </p>
+                    </div>
+
+                    {/* Same control as Activate — same class, same states on the
+                        same `data-state` attribute — just sized to its label
+                        instead of the card. `ready` is saturated only because
+                        Activate is idle until you type: one primary on screen,
+                        which is the rule this section already follows. */}
+                    <button
+                      onClick={handleStartTrial}
+                      disabled={trialLoading || isClaimed}
+                      data-state={trialLoading ? 'saving' : isClaimed ? 'idle' : 'ready'}
+                      className={`natively-key-cta shrink-0 h-9 px-5 text-[13px] font-medium select-none flex items-center justify-center gap-2 ${
+                        trialLoading ? 'cursor-wait' : isClaimed ? 'cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                    {/* The pill keeps the wider label's width through the swap. */}
+                    <SwapLabel
+                      id={trialLoading ? 'starting' : isClaimed ? 'claimed' : 'start'}
+                      sizers={['Start free trial', <span className="flex items-center gap-2"><span className="w-[13px]" /> Starting…</span>]}
+                    >
+                      {trialLoading ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 size={13} className="animate-spin" /> Starting…
+                        </span>
+                      ) : isClaimed ? (
+                        'Already claimed'
+                      ) : (
+                        'Start free trial'
+                      )}
+                    </SwapLabel>
+                    </button>
+                  </div>
+
+                  {/* Error Handling. Inks in a beat after its row opens, like
+                      every arrival in this tab. */}
+                  {trialError && !isClaimed && (
+                    <motion.div
+                      key={trialError}
+                      className="flex items-center gap-2"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: INK.in, ease: EASE_ENTER, delay: prefersReducedMotion ? 0 : BEAT }}
+                    >
+                      <AlertCircle size={13} className="text-[var(--text-danger)] shrink-0" strokeWidth={2} />
+                      <p className="text-[12px] text-[var(--text-danger)]">{trialError}</p>
+                    </motion.div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          );
+        })()}
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* ── Natively key card — one box for either credential type ────── */}
+      <div>
+        {/* No "Natively key" heading: the card's first line already says what
+            goes in the box. The Connected / Remove row stays once a key is saved. */}
+        {!isLoading && isSaved && (
+          <div className="flex items-center justify-end px-1 mb-2">
+              <div className="flex items-center gap-3 shrink-0">
+                {/* An ended pack is still the saved key, but nothing it unlocks
+                    works: amber and "ended", not the green of a live plan. */}
+                <span className={`flex items-center gap-1.5 text-[11px] font-medium ${keyPack?.ended ? 'text-amber-500' : 'text-emerald-500'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${keyPack?.ended ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                  {keyPack?.ended ? `${planLabel ?? 'Pack'} ended` : (planLabel ?? 'Connected')}
+                </span>
+                <button
+                  onClick={handleClear}
+                  className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-[var(--text-danger)] transition-colors duration-150 cursor-pointer motion-reduce:transition-none"
+                >
+                  <Trash2 size={11} strokeWidth={2} />
+                  Remove
+                </button>
+              </div>
+          </div>
+        )}
+        {/* The pack key held beside the plan's key: the same row, its own
+            label and Remove, and one line on when it is used. */}
+        {!isLoading && isSaved && heldPack?.state.held && (() => {
+          const usage = heldPack.usage;
+          const status = usage?.ok ? packStatus(usage.pack) : null;
+          const ended = !usage?.ok || !!status?.ended;
+          const name = (usage?.ok && apiPlanLabel(usage.plan)) || 'Pack';
+          const label = ended
+            ? `${name} ended`
+            : status?.secondsLeft != null ? `${name} · ${formatMeetingTime(status.secondsLeft)} left` : name;
+          const note = ended ? null : heldPackNote(heldPack.state, { formatDate: fmtDate });
+          return (
+            <div data-held-pack className="px-1 mb-2 -mt-1">
+              <div className="flex items-center justify-end gap-3">
+                <span className={`flex items-center gap-1.5 text-[11px] font-medium ${ended ? 'text-amber-500' : heldPack.state.inUse ? 'text-emerald-500' : 'text-text-secondary'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${ended ? 'bg-amber-500' : heldPack.state.inUse ? 'bg-emerald-500' : 'bg-text-tertiary'}`} />
+                  {label}
+                </span>
+                <button
+                  onClick={removeHeldPack}
+                  className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-[var(--text-danger)] transition-colors duration-150 cursor-pointer motion-reduce:transition-none"
+                >
+                  <Trash2 size={11} strokeWidth={2} />
+                  Remove
+                </button>
+              </div>
+              {note && <p className="text-[11px] text-text-tertiary leading-snug text-right mt-0.5">{note}</p>}
+            </div>
+          );
+        })()}
+
+        {/* `natively-key-card` gives the flat box the same MATERIAL as the
+            rest of this tab — layered fill, specular top hairline, raised
+            floor shadow — without its COLOUR. The
+            plaque and its well are achromatic; the Activate button is the only
+            saturated thing in the section, and only once it has something to
+            act on. See the "tactile credential plaque" block in index.css. */}
+        <Card>
+          <div className="px-4 py-4 space-y-3">
+            {/* Says the quiet part out loud: one box, EITHER credential. The
+                placeholder alone was carrying that, and a placeholder
+                disappears the moment you type. It is also the card's heading now
+                that the "Natively key" label is gone. */}
+            {/* The heading row, with "Lost your key?" at its right (only while
+                no key is saved: once one is, there is nothing to recover), and
+                the pill it reveals right under it, above the field the key goes
+                into. One block, so the card's 12px rhythm does not jump when the
+                pill mounts: the pill brings its own gap and animates it. */}
+            <div>
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="natively-key-sub min-w-0 text-[12px] leading-snug">
+                  Activate with a Natively API key or a Natively Pro license.
+                </p>
+                {!isSaved && (
+                  <KeyResendLink ref={resendLinkRef} open={resendOpen} onToggle={() => setResendOpen((o) => !o)} />
+                )}
+              </div>
+              {!isSaved && (
+                <KeyResendHelp
+                  open={resendOpen}
+                  onClose={(fromKeyboard) => {
+                    setResendOpen(false);
+                    if (fromKeyboard) resendLinkRef.current?.focus();
+                  }}
+                />
+              )}
+            </div>
+
+            {/* The input is the subject of this card. It's now a pressed-in
+                well rather than a hairline box — same inset vocabulary as the
+                jelly controls, and it gives the credential somewhere to sit.
+
+                The placeholder names the two credential types instead of
+                showing the raw `natively_sk_` prefix. That prefix is real —
+                handleSave routes on it — but it is an implementation detail
+                the user has no reason to recognise, and pairing a literal
+                token against the plain-English "or your Pro license key" made
+                the two halves read as different KINDS of thing rather than as
+                two options for the same box. */}
+            <input
+              type="text"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                setIsSaved(false);
+                setError(null);
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+              placeholder="Natively API key or Natively Pro license"
+              spellCheck={false}
+              autoComplete="off"
+              data-invalid={error ? 'true' : 'false'}
+              ref={keyInputRef}
+              className="natively-key-input w-full px-3.5 h-11 text-[13px] font-mono text-text-primary
+                            placeholder:text-text-tertiary placeholder:font-sans"
+            />
+
+            {/* Error. The row takes its space at once (the plans below FLIP
+                down) and its ink follows a BEAT later, like every arrival in
+                this tab; keyed on the message so a different one re-inks. */}
+            {error && (
+              <motion.div
+                key={error}
+                className="flex items-center gap-2 text-[12px] text-[var(--text-danger)]"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: INK.in, ease: EASE_ENTER, delay: prefersReducedMotion ? 0 : BEAT }}
+              >
+                <AlertCircle size={13} className="shrink-0" />
+                {error}
+              </motion.div>
+            )}
+
+            {/* Not an error: the key is saved, Pro is still being activated. */}
+            {!error && proNotice && (
+              <motion.div
+                key={proNotice}
+                className="flex items-start gap-2 text-[12px] text-[var(--text-secondary)]"
+                role="status"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: INK.in, ease: EASE_ENTER, delay: prefersReducedMotion ? 0 : BEAT }}
+              >
+                <AlertCircle size={13} className="shrink-0 mt-[2px]" />
+                {proNotice}
+              </motion.div>
+            )}
+            {!error && proNotice && diagOffer && <DiagnosticReportActions />}
+
+            {/* Save / Activate button. The disabled state used to be a
+                full-width saturated slab (`bg-legacy-action-disabled-bg`),
+                which made a control you cannot press the loudest element on
+                the card. It now recedes until there's something to submit.
+                The four states are unchanged — they're just projected onto a
+                `data-state` attribute so the paint (jelly clay on the accent
+                accent when ready, ghost when not, tinted chip on success)
+                lives in index.css next to the rest of the tab's material. */}
+            <button
+              onClick={handleSave}
+              disabled={isSaving || !isDirty}
+              data-state={
+                isSaving ? 'saving' : justSaved || justActivatedPro ? 'done' : !isDirty ? 'idle' : 'ready'
+              }
+              className={`natively-key-cta w-full h-10 text-[13px] font-medium select-none ${
+                isSaving
+                  ? 'cursor-wait'
+                  : justSaved || justActivatedPro
+                    ? 'cursor-pointer'
+                    : !isDirty
+                      ? 'cursor-default'
+                      : 'cursor-pointer'
+              }`}
+            >
+              <CtaLabel id={isSaving ? 'saving' : justSaved ? 'saved' : justActivatedPro ? 'pro' : 'activate'}>
+              {isSaving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 size={13} className="animate-spin" />
+                  Activating…
+                </span>
+              ) : justSaved ? (
+                <span className="flex items-center justify-center gap-2">
+                  <CheckCircle size={13} />
+                  Saved
+                </span>
+              ) : justActivatedPro ? (
+                <span className="flex items-center justify-center gap-2">
+                  <CheckCircle size={13} />
+                  Pro activated
+                </span>
+              ) : (
+                'Activate'
+              )}
+              </CtaLabel>
+            </button>
+          </div>
+        </Card>
+
+        {/* T&C footnote under the card. The "Don't have a key? Subscribe to get
+            one" prompt that used to lead this line is gone — the plan chooser
+            directly below is the same call to action, stated better. */}
+        <p className="text-[11px] text-text-tertiary leading-relaxed mt-2.5 px-1 text-center">
+          By activating, you agree to our{' '}
+          <span
+            onClick={() => openExternal('https://natively.software/nativelyapi/t&c')}
+            className="text-text-secondary hover:text-text-primary underline decoration-border-muted underline-offset-[3px] cursor-pointer transition-colors duration-150 motion-reduce:transition-none"
+          >
+            Terms &amp; Conditions
+          </span>
+          .
+        </p>
+      </div>
+
+      {afterKeySection}
+
+      {/* ── Plans ──────────────────────────────────────────
+          Leads the arrival sequence on key removal: it takes over the region
+          the Usage card and the "Change plan" accordion just vacated, so it is
+          the thing that answers "what replaced what I removed".
+          `y: -8` — it descends from the key card above that caused the change. */}
+      <AnimatePresence mode="popLayout" initial={false}>
+        {!isSaved && (
+          <motion.div
+            key="api-plans"
+            layout="position"
+            // width:100% is REQUIRED, not cosmetic: mode="popLayout" sets
+            // position:absolute on the exiting child, and without an explicit
+            // width it collapses to content width the instant it pops — a
+            // visible horizontal snap before the fade.
+            // `contain: layout` (never `paint` — these cards' 12-32px shadows
+            // paint outside their box and would be clipped) confines the
+            // invalidation of the two commit-pass layouts.
+            style={{ width: '100%', contain: 'layout' }}
+            // No `y` and no `height`. FLIP owns every pixel of vertical motion;
+            // a `y` on top of it composites a second translation, and a `height`
+            // is what made this choppy in the first place.
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={prefersReducedMotion ? { opacity: 0, transition: { duration: INK.out } } : { opacity: 0, scale: 0.985 }}
+            transition={
+              prefersReducedMotion
+                ? { layout: { duration: 0 }, default: { duration: INK.in, delay: BEAT } }
+                : {
+                  // `layout` defaults to a SPRING — name it or the house curves
+                  // are silently discarded.
+                  layout: { duration: SETTLE.activate, ease: EASE_ENTER },
+                  opacity: { duration: INK.in, ease: EASE_ENTER, delay: BEAT },
+                  default: { duration: INK.out, ease: EASE_LEAVE },
+                }
+            }
+          >
+            {PlansCard}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Usage card — only for a Natively API key with a confirmed  ── */}
+      {/* valid plan (usageData populated by a successful quota fetch). */}
+      {/* isSaved alone isn't enough: a saved-but-invalid/inactive key   */}
+      {/* has nothing usage-shaped to show, so the section stays hidden */}
+      {/* entirely rather than surfacing a card with an error in it.    */}
+      {/* Presence is gated on `isSaved` ALONE, and `usageData` is cleared from
+          this wrapper's onExitComplete rather than in handleClear. AnimatePresence
+          cannot play an exit for a child whose data has already vanished — nulling
+          both in the same tick made this unmount instantly no matter what it was
+          wrapped in. The inner guard keeps the null-safety for the case where a
+          saved key simply has no valid plan. */}
+      <AnimatePresence mode="popLayout" initial={false} onExitComplete={() => setUsageData(null)}>
+      {isSaved && usageData && (
+        <motion.div
+          key="api-usage"
+          layout="position"
+          // width:100% is REQUIRED, not cosmetic: mode="popLayout" sets
+          // position:absolute on the exiting child, and without an explicit
+          // width it collapses to content width the instant it pops — a
+          // visible horizontal snap before the fade.
+          // `contain: layout` (never `paint` — these cards' 12-32px shadows
+          // paint outside their box and would be clipped) confines the
+          // invalidation of the two commit-pass layouts.
+          style={{ width: '100%', contain: 'layout' }}
+          // No `y` and no `height`. FLIP owns every pixel of vertical motion;
+          // a `y` on top of it composites a second translation, and a `height`
+          // is what made this choppy in the first place.
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={prefersReducedMotion ? { opacity: 0, transition: { duration: INK.out } } : { opacity: 0, scale: 0.985 }}
+          transition={
+            prefersReducedMotion
+              ? { layout: { duration: 0 }, default: { duration: INK.in, delay: usageDelay(BEAT) } }
+              : {
+                // `layout` defaults to a SPRING — name it or the house curves
+                // are silently discarded.
+                layout: { duration: SETTLE.activate, ease: EASE_ENTER },
+                opacity: { duration: INK.in, ease: EASE_ENTER, delay: usageDelay(BEAT) },
+                default: { duration: INK.out, ease: EASE_LEAVE },
+              }
+          }
+        >
+          {/* A pack never resets, it ends (its quota reset date is 2100): its
+              heading and date are the pack's own, the use-by date. A yearly
+              key refills monthly like any other, and says it renews yearly. */}
+          {keyIsPack ? (
+            <SectionLabel
+              aside={
+                <span className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] text-text-tertiary">
+                    {/* ends_at is the use-by date. A pack whose hours ran out
+                        ended before it, so that date is not when it ended. */}
+                    {keyPack?.ended && keyPack.endedReason !== 'window_closed'
+                      ? 'Ended'
+                      : keyPack?.endsAt
+                        ? `${keyPack.ended ? 'Ended' : 'Use by'} ${fmtDate(keyPack.endsAt)}`
+                        : 'One-time pack'}
+                  </span>
+                  {usageRefreshButton}
+                </span>
+              }
+            >
+              Pack usage
+            </SectionLabel>
+          ) : (
+          <SectionLabel
+            aside={
+              <span className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-text-tertiary">
+                  Resets {fmtDate(usageData.quota.resets_at)}
+                  {usageData.billing_period === 'yearly' && ' · renews yearly'}
+                </span>
+                {usageRefreshButton}
+              </span>
+            }
+          >
+            Usage this month
+          </SectionLabel>
+          )}
+
+          <Card>
+            <div className="px-4 py-4 space-y-4">
+              {keyIsPack && keyPack && <PackMeetingTime status={keyPack} />}
+              {/* The four product categories, in the order they cost money.
+                  Names are the customer's, not the implementation's: "Voice
+                  Usage" rather than STT, "Research" rather than web searches.
+                  Every figure comes from the server response, so there is
+                  nothing in this file for a plan change to make stale.
+
+                  percentOnly: the monthly panel reports how much of the
+                  allowance is gone, not what the allowance IS. See ResourceMeter
+                  for why the trial panel above still shows the pair. */}
+              <ResourceMeter label="AI Usage" icon={Brain} meter={usageData.quota.ai} percentOnly />
+              <KnowledgeUsage knowledge={usageData.quota.knowledge} percentOnly />
+              <ResourceMeter label="Voice Usage" icon={Mic} meter={usageData.quota.voice} percentOnly />
+              <ResourceMeter label="Research" icon={Search} meter={usageData.quota.research} percentOnly />
+            </div>
+          </Card>
+          {/* Credit a plan change carried over, already inside the meters above. */}
+          {(() => {
+            const line = carryLine(usageData.carry, { formatNumber: formatCompact, formatDate: fmtDate });
+            return line ? <p data-carry-line className="text-[11px] text-text-tertiary px-1 mt-2 leading-snug">{line}</p> : null;
+          })()}
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* ── Plans — already-subscribed users have already chosen a plan; ── */}
+      {/* collapse the chooser behind "Change plan" instead of always showing */}
+      {/* the full pricing selector at equal weight to Usage above it.        */}
+      <AnimatePresence mode="popLayout" initial={false}>
+        {isSaved && (
+          <motion.div
+            key="api-change-plan"
+            layout="position"
+            // width:100% is REQUIRED, not cosmetic: mode="popLayout" sets
+            // position:absolute on the exiting child, and without an explicit
+            // width it collapses to content width the instant it pops — a
+            // visible horizontal snap before the fade.
+            // `contain: layout` (never `paint` — these cards' 12-32px shadows
+            // paint outside their box and would be clipped) confines the
+            // invalidation of the two commit-pass layouts.
+            style={{ width: '100%', contain: 'layout' }}
+            // No `y` and no `height`. FLIP owns every pixel of vertical motion;
+            // a `y` on top of it composites a second translation, and a `height`
+            // is what made this choppy in the first place.
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={prefersReducedMotion ? { opacity: 0, transition: { duration: INK.out } } : { opacity: 0, scale: 0.985 }}
+            transition={
+              prefersReducedMotion
+                ? { layout: { duration: 0 }, default: { duration: INK.in, delay: BEAT } }
+                : {
+                  // `layout` defaults to a SPRING — name it or the house curves
+                  // are silently discarded.
+                  layout: { duration: SETTLE.activate, ease: EASE_ENTER },
+                  opacity: { duration: INK.in, ease: EASE_ENTER, delay: BEAT },
+                  default: { duration: INK.out, ease: EASE_LEAVE },
+                }
+            }
+          >
+            {/* hoverFill off, as on How it works below: the header answers the
+                pointer by brightening its chevron, not by filling the row. */}
+            {/* No divider under the header (2026-10-24), as How it works: the
+                tier bar follows the title directly; -mt-3 takes the body's
+                top padding down to How it works' spacing. */}
+            {/* Open for an ended pack: the overlay's "Add hours" lands here,
+                and the pack cards are the next step. Keyed so it opens when
+                the pack ends while this tab is on screen, not just on mount. */}
+            <AccordionSection
+              key={keyPack?.ended ? 'pack-ended' : 'plan-live'}
+              defaultOpen={!!keyPack?.ended}
+              title="Change plan"
+              className="natively-key-card bg-bg-item-surface rounded-2xl border-border-subtle !mb-0"
+              divider={false}
+              hoverFill={false}
+            >
+              <div className="-mt-3">{PlansCard}</div>
+            </AccordionSection>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── How it works + Refund Policy — collapsed by default, this is ── */}
+      {/* reference material, not something read on every settings visit.  */}
+    </div>
+    </LayoutGroup>
+  );
+};

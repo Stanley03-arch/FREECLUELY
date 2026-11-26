@@ -1,0 +1,185 @@
+// electron/context-intelligence/generation/context-packer.ts
+//
+// Deterministic, budgeted evidence packing.
+//
+// WHAT THIS REPLACES
+// Five of nine legacy answer surfaces pass `session.getFormattedContext(N)` —
+// a raw transcript blob — straight to the model, and the profile path injects
+// full resume/JD blocks from 11 independent sites. That is §32.16's anti-pattern
+// ("do not inject complete transcripts or documents by default") as the DEFAULT.
+//
+// Packing here is deterministic: same evidence + same budget => byte-identical
+// output. A non-deterministic packer makes every downstream regression
+// unreproducible, which is how prompt-level fixes came to look like they worked.
+//
+// See docs/context-intelligence-v3/07_EVIDENCE_CONTRACT.md §7
+
+import type { EvidenceItem, ClaimRequirement, TurnDecision } from '../contracts/types';
+
+export interface PackBudget {
+  evidenceTokens: number;
+  conversationTokens: number;
+  transcriptTokens: number;
+}
+
+export interface PackedContext {
+  /** XML-tagged evidence block, ready for the composer. */
+  evidenceBlock: string;
+  includedEvidenceIds: string[];
+  droppedEvidenceIds: string[];
+  estimatedTokens: number;
+}
+
+/** Rough but STABLE token estimate (~4 chars/token). Exactness is not the point;
+ *  determinism is — a fluctuating estimate would make packing non-reproducible. */
+export const estimateTokens = (s: string): number => Math.ceil(s.length / 4);
+
+/** XML-escape so document text can never close the tag it lives in or forge a
+ *  sibling tag OR ATTRIBUTE. Retrieved content is DATA (§23) and must not be
+ *  able to restructure the prompt around it. `"` matters as of 2026-07-31:
+ *  section names are now derived from document content (the profile port's
+ *  `Experience: <role> at <company>`), and an unescaped quote inside an
+ *  attribute value let a hostile JD title forge `complete_inventory="true"` —
+ *  the exact attribute the checked-absence contract keys on (review finding). */
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Priority (§18): evidence for REQUIRED claims first, then by source priority,
+ * then by score. Ties broken by evidenceId so the order is total and stable.
+ */
+function rank(evidence: EvidenceItem[], required: ClaimRequirement[], groupBySource = false): EvidenceItem[] {
+  const requiredClaims = new Set(
+    required.filter((c) => c.authority === 'PRIVATE_SOURCE_REQUIRED').map((c) => c.claimType),
+  );
+  const ranked = [...evidence].sort((a, b) => {
+    const aReq = a.acceptedFor.some((c) => requiredClaims.has(c)) ? 1 : 0;
+    const bReq = b.acceptedFor.some((c) => requiredClaims.has(c)) ? 1 : 0;
+    if (aReq !== bReq) return bReq - aReq;
+    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+    return a.evidenceId.localeCompare(b.evidenceId);   // total order
+  });
+  if (!groupBySource) return ranked;
+  // An exhaustive request is answered file by file (the composer says so), so
+  // the blocks are GROUPED by source in the order each source first appears in
+  // the ranking; order inside a group is the ranking. Measured 2026-09-07: with
+  // 18 blocks interleaved across six files the model listed 9 of ~20 values and
+  // skipped whole files it had been handed.
+  const groups = new Map<string, EvidenceItem[]>();
+  for (const e of ranked) {
+    const g = groups.get(e.sourceId);
+    if (g) g.push(e);
+    else groups.set(e.sourceId, [e]);
+  }
+  return [...groups.values()].flat();
+}
+
+function renderEvidence(e: EvidenceItem): string {
+  const attrs = [
+    `evidence_id="${esc(e.evidenceId)}"`,
+    `source_type="${e.sourceType}"`,
+    `source_id="${esc(e.sourceId)}"`,
+    `version_id="${esc(e.versionId)}"`,
+    `scope_id="${esc(e.scopeId)}"`,
+    e.section ? `section="${esc(e.section)}"` : '',
+    // Provenance (deep-test D8): the human-readable source name and the file's
+    // own declared status. Without these the model saw two conflicting values
+    // with no way to explain WHY one wins, and invented a rationale.
+    e.documentTitle ? `source_name="${esc(e.documentTitle)}"` : '',
+    // Physical origin of the text (issue 10 / Pattern D): lets the model say
+    // "the reference brief proposes X" vs "the meeting decided X" from the
+    // attribute instead of inferring provenance from a filename.
+    e.provenance ? `provenance="${e.provenance}"` : '',
+    typeof (e.metadata as Record<string, unknown> | undefined)?.documentStatus === 'string'
+      ? `status="${esc(String((e.metadata as Record<string, unknown>).documentStatus))}"` : '',
+    `authority="${e.authorityFor.join(',')}"`,
+    `direct_fact="${e.isDirectFact}"`,
+    // Surfaces the port's complete-record declaration so the composer's
+    // checked-absence contract has something in the evidence to point at.
+    (e.metadata as Record<string, unknown> | undefined)?.completeInventory === true
+      ? 'complete_inventory="true"' : '',
+  ].filter(Boolean).join(' ');
+  return `<evidence ${attrs}>\n${esc(e.content.trim())}\n</evidence>`;
+}
+
+/** Appended to an item cut to fit, so a partial passage never reads as the whole of it. */
+export const TRIMMED_EVIDENCE_MARKER = '[… the rest of this passage was cut to fit; it continues in the source]';
+/** Below this much room for text, trimming is pointless and the item is skipped as before. */
+const MIN_TRIMMED_CONTENT_CHARS = 200;
+
+/** Render `e` with its content cut (at a word boundary) so the whole item costs at most `tokens`; null when too little room. */
+function trimToFit(e: EvidenceItem, tokens: number): string | null {
+  const shell = estimateTokens(renderEvidence({ ...e, content: `\n${TRIMMED_EVIDENCE_MARKER}` }));
+  let chars = (tokens - shell) * 4;
+  const text = e.content.trim();
+  // Escaping can only grow the text, so shrink until the rendered item fits.
+  for (let i = 0; i < 8 && chars >= MIN_TRIMMED_CONTENT_CHARS; i++) {
+    let cut = text.slice(0, chars);
+    const ws = cut.lastIndexOf(' ');
+    if (ws > chars * 0.8) cut = cut.slice(0, ws);
+    const rendered = renderEvidence({ ...e, content: `${cut.trimEnd()}\n${TRIMMED_EVIDENCE_MARKER}` });
+    if (estimateTokens(rendered) <= tokens) return rendered;
+    chars = Math.floor(chars * 0.9);
+  }
+  return null;
+}
+
+export function packContext(
+  decision: Readonly<TurnDecision>,
+  evidence: EvidenceItem[],
+  budget: PackBudget,
+): PackedContext {
+  const ordered = rank(evidence, decision.claimRequirements, decision.retrievalPlan.exhaustive === true);
+
+  const included: string[] = [];
+  const dropped: string[] = [];
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  let used = 0;
+
+  for (const e of ordered) {
+    // Duplicate content is dropped regardless of score — two copies of the same
+    // passage buy nothing and crowd out a second perspective. Keyed per SOURCE:
+    // cross-source duplicates (the profile résumé vs a duplicate mode
+    // attachment) are handled upstream by combineRetrievalPorts, which keeps
+    // one copy and merges its complete-record declaration — deduping across
+    // sources HERE would also merge distinct reference files that share
+    // boilerplate in strict modes (review finding, 2026-07-31).
+    const key = `${e.sourceId}:${e.content.trim().toLowerCase().replace(/\s+/g, ' ')}`;
+    if (seen.has(key)) { dropped.push(e.evidenceId); continue; }
+
+    let rendered = renderEvidence(e);
+    let cost = estimateTokens(rendered);
+    if (used + cost > budget.evidenceTokens) {
+      // THE BEST ITEM IS TRIMMED, NEVER DROPPED (F-CTX-14, 2026-11-13). This
+      // used to `continue` for every item, so an oversized rank-1 chunk was
+      // the one thing missing while smaller, lower-ranked ones filled the
+      // budget. Only the FIRST item kept is trimmed: a later oversized item
+      // is still skipped, so it can never push the best one out.
+      const trimmed = included.length === 0 ? trimToFit(e, budget.evidenceTokens - used) : null;
+      if (!trimmed) { dropped.push(e.evidenceId); continue; }
+      rendered = trimmed;
+      cost = estimateTokens(rendered);
+    }
+
+    seen.add(key);
+    parts.push(rendered);
+    included.push(e.evidenceId);
+    used += cost;
+  }
+
+  // Cap is enforced AFTER budget so the highest-priority items survive both.
+  const cap = decision.retrievalPlan.maximumAcceptedEvidence;
+  if (included.length > cap) {
+    for (const id of included.splice(cap)) dropped.push(id);
+    parts.length = included.length;
+  }
+
+  return {
+    evidenceBlock: parts.join('\n\n'),
+    includedEvidenceIds: included,
+    droppedEvidenceIds: dropped,
+    estimatedTokens: estimateTokens(parts.join('\n\n')),
+  };
+}

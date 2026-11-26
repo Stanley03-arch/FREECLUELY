@@ -1,0 +1,52 @@
+export function resolveChatStreamToken(
+  activeId: number | null | undefined,
+  incomingId: number | null | undefined,
+  /** Surface owning the currently-adopted stream. Absent → legacy 'desktop'. */
+  activeSource?: string | null,
+  /** Surface of the incoming token. Absent → legacy 'desktop'. */
+  incomingSource?: string | null,
+): { accept: boolean; activeId: number | null; activeSource: string | null };
+
+export function resolveChatStreamDone(
+  activeId: number | null | undefined,
+  incomingId: number | null | undefined,
+  activeSource?: string | null,
+  incomingSource?: string | null,
+): {
+  honor: boolean;
+  activeId: number | null;
+  activeSource: string | null;
+  /**
+   * CR-01: set when the done is NOT honored but belongs to a request the LOCAL
+   * surface started. The caller must stop its own processing indicator without
+   * finalizing the active row, or the spinner runs forever.
+   */
+  release: boolean;
+};
+
+/** A desktop chat stream replaced by a newer typed question (2026-11-06): drop what it still sends. */
+export function isReplacedChatStream(
+  floor: number | null | undefined,
+  incomingId: number | null | undefined,
+  incomingSource?: string | null,
+): boolean;
+
+/** An event of a desktop chat stream older than the last typed question (2026-11-06): drop it. */
+export function isStaleDesktopChatEvent(
+  state: { awaitingStart?: boolean; floor?: number | null } | null | undefined,
+  incomingId: number | null | undefined,
+  incomingSource?: string | null,
+): boolean;
+
+export function resolveLiveAnswerBatch(
+  activeId: number | null | undefined,
+  incomingId: number | null | undefined,
+): { accept: boolean; activeId: number | null };
+
+export function resolveChatStreamSurfaceError(
+  activeSource: string | null | undefined,
+  incomingSource: string | null | undefined,
+): { release: boolean };
+
+export function shouldApplyLiveAnswerDiscard(activeId: number | null | undefined, incomingId: number | null | undefined): boolean;
+export function liveAnswerDiscardKeepsThinking(reason: string | null | undefined): boolean;

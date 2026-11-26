@@ -1,0 +1,497 @@
+/**
+ * afterAllArtifactBuild.cjs — electron-builder hook (used by electron-builder.signed.cjs).
+ *
+ * electron-builder's built-in `mac.notarize` notarizes + staples the .app (so the
+ * .app inside the updater ZIP is stapled). TWO gaps remained that this hook closes:
+ *
+ *  (1) electron-builder's own DMG-creation CORRUPTS the embedded app signature.
+ *      Apple's notary log on the eb-built DMG reported:
+ *        "The signature of the binary is invalid" @ Natively.app/Contents/MacOS/Natively
+ *      Verified: the standalone .app and the .app inside the ZIP pass
+ *      `codesign --verify --deep --strict`, but the .app inside the eb DMG does NOT
+ *      (even after ditto-copying it back out) — so eb's DMG layout step breaks it.
+ *      FIX: ignore eb's .dmg artifacts and REBUILD each DMG from the pristine signed
+ *      .app using `create-dmg` (which stages via `hdiutil create -srcfolder`, a
+ *      block-copy that preserves the framework `Versions/Current` symlinks +
+ *      `_CodeSignature`). Proven clean: the rebuilt DMG's app passes deep verify +
+ *      spctl "Notarized Developer ID".
+ *
+ *  (2) eb does not notarize/staple the DMG container. A downloaded DMG that isn't
+ *      notarized+stapled trips Gatekeeper and needs the `xattr` workaround we're
+ *      eliminating.
+ *
+ *  (3) NEITHER STEP RETRIED (added 2026-08-26). These are the last two calls of a
+ *      ~55-minute signed build, long after both .apps are notarized + stapled and
+ *      both updater ZIPs are written. A build died here when the 1.01 GB arm64
+ *      upload was reset at part 148 ("Network.NWError error 54 - Connection reset
+ *      by peer"): notarytool does not retry, so one dropped connection cost a full
+ *      rebuild. FIX: the submit retries while NO verdict was reached (never after a
+ *      decided Invalid/Rejected) via scripts/lib/notary-transient.cjs, and the
+ *      staple goes through scripts/staple-with-retry.js for the CDN ticket race.
+ *
+ * Per macOS arch slice (release/mac = x64, release/mac-arm64 = arm64):
+ *   1. create-dmg → styled DMG from the signed .app (signs the DMG with Developer ID)
+ *   2. xcrun notarytool submit --wait  (bounded retry — see (3))
+ *   3. xcrun stapler staple            (retried through CDN ticket-propagation lag)
+ *
+ * Then re-patch each dmg's sha512/size in latest*.yml (the dmg is brand-new bytes),
+ * and assert the updater ZIP manifest still matches (the updater consumes the ZIP).
+ *
+ * Credentials (no plaintext secrets in source): prefers App Store Connect API key
+ * (CI), then Apple ID + app-specific password, then the local keychain profile
+ * (APPLE_KEYCHAIN_PROFILE, e.g. `natively-notary`). No-op if none are present.
+ */
+
+const { execFileSync, execSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const { notarytoolSubmitWithRetry, isTransientNetworkMessage } = require('./lib/notary-transient.cjs');
+const { stapleWithRetry } = require('./staple-with-retry');
+const { runCreateDmg } = require('./lib/create-dmg-run.cjs');
+const {
+  RUN_ID_ENV, EARLY_ARCH, waitForDmgJob, earlyDmgDecision, dmgIsNewerThanApp, appSignedMtimeMs,
+} = require('./lib/dmg-job.cjs');
+
+// DMG volume + file name base. MUST match the on-disk app identity so the DMG
+// (and its volume window) present the same disguised name as the .app inside it
+// (see scripts/disguise-name.cjs). The signed pipeline builds only the ZIP via
+// electron-builder (named from productName) and rebuilds the styled DMG here, so
+// VOLNAME and productName must agree or the artifact set desyncs.
+const VOLNAME = require('./disguise-name.cjs').darwin;
+const BACKGROUND = path.resolve(__dirname, '..', 'assets', 'dmg-background.png');
+const VOLICON = path.resolve(__dirname, '..', 'assets', 'natively.icns');
+
+function sha512base64(file) {
+  return crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64');
+}
+
+function resolveDeveloperIdIdentity() {
+  if (process.env.NATIVELY_SIGN_IDENTITY) return process.env.NATIVELY_SIGN_IDENTITY;
+  if (process.env.CSC_NAME) return process.env.CSC_NAME;
+  try {
+    const out = execSync('security find-identity -v -p codesigning', { encoding: 'utf8' });
+    const m = out.match(/"(Developer ID Application:[^"]+)"/);
+    if (m) return m[1];
+  } catch { /* fall through */ }
+  return null; // codesign step skipped if unresolved; notarization can still proceed
+}
+
+/** notarytool credential args, mirroring scripts/notarize.js precedence. null => no creds. */
+function notarytoolArgs() {
+  const e = process.env;
+  if (e.APPLE_API_KEY && e.APPLE_API_KEY_ID && e.APPLE_API_ISSUER) {
+    // Skip (loudly) when the .p8 path no longer resolves, so a stale export cannot
+    // shadow a working APPLE_KEYCHAIN_PROFILE. Kept in lockstep with the identical
+    // guard in scripts/notarize.js — see that file's resolveCredentials() for the
+    // full rationale. Without it the dead path reaches notarytool and kills the DMG
+    // notarization step AFTER the .app has already been notarized and stapled.
+    if (fs.existsSync(e.APPLE_API_KEY)) {
+      return ['--key', e.APPLE_API_KEY, '--key-id', e.APPLE_API_KEY_ID, '--issuer', e.APPLE_API_ISSUER];
+    }
+    console.warn(
+      `[dmg-notarize] APPLE_API_KEY points at a file that does not exist: ${e.APPLE_API_KEY} — ` +
+        'ignoring the api-key strategy and falling through (apple-id, then keychain-profile).'
+    );
+  }
+  if (e.APPLE_ID && e.APPLE_APP_SPECIFIC_PASSWORD && e.APPLE_TEAM_ID) {
+    return ['--apple-id', e.APPLE_ID, '--password', e.APPLE_APP_SPECIFIC_PASSWORD, '--team-id', e.APPLE_TEAM_ID];
+  }
+  if (e.APPLE_KEYCHAIN_PROFILE) {
+    const a = ['--keychain-profile', e.APPLE_KEYCHAIN_PROFILE];
+    if (e.APPLE_KEYCHAIN) a.push('--keychain', e.APPLE_KEYCHAIN);
+    return a;
+  }
+  return null;
+}
+
+function patchYmlDmgHashes(outDir, dmgPaths) {
+  const ymls = fs.readdirSync(outDir).filter((f) => /^latest.*\.yml$/.test(f));
+  for (const dmg of dmgPaths) {
+    const name = path.basename(dmg);
+    const size = fs.statSync(dmg).size;
+    const sha = sha512base64(dmg);
+    const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(- url: ${escName}\\s*\\n\\s*sha512: )[^\\n]+(\\s*\\n\\s*size: )\\d+`);
+    let matchedSomewhere = false;
+    for (const yml of ymls) {
+      const ymlPath = path.join(outDir, yml);
+      const txt = fs.readFileSync(ymlPath, 'utf8');
+      if (re.test(txt)) {
+        fs.writeFileSync(ymlPath, txt.replace(re, `$1${sha}$2${size}`));
+        matchedSomewhere = true;
+        console.log(`[dmg-notarize] patched ${name} hash in ${yml}`);
+      }
+    }
+    // The dmg may legitimately be absent from the manifest; warn so a future
+    // electron-builder yml format change (which would silently no-match) is visible.
+    if (!matchedSomewhere) {
+      console.warn(`[dmg-notarize] WARNING: ${name} not found in any latest*.yml — hash NOT patched (yml format change?).`);
+    }
+  }
+}
+
+/**
+ * Mount a DMG read-only and assert the .app inside passes `codesign --verify --deep
+ * --strict` and Gatekeeper. This is the regression guard for the electron-builder
+ * DMG-corruption bug: if a future DMG-build path ever breaks the embedded signature
+ * again, the build FAILS here instead of shipping a non-notarizable installer.
+ */
+function verifyDmgAppSignature(dmgPath) {
+  const attach = execFileSync('hdiutil', ['attach', dmgPath, '-nobrowse', '-readonly', '-noverify'], { encoding: 'utf8' });
+  const mountLine = attach.split('\n').find((l) => l.includes('/Volumes/'));
+  const mount = mountLine ? mountLine.slice(mountLine.indexOf('/Volumes/')).trim() : null;
+  if (!mount) throw new Error(`[dmg] could not mount ${path.basename(dmgPath)} for verification`);
+  try {
+    const app = fs.readdirSync(mount).find((f) => f.endsWith('.app'));
+    if (!app) throw new Error(`[dmg] no .app found inside ${path.basename(dmgPath)}`);
+    const appInDmg = path.join(mount, app);
+    // Throws (non-zero exit) if the embedded signature is invalid — exactly the eb bug.
+    execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appInDmg], { stdio: 'inherit' });
+    // NOTE: spctl writes its "accepted / source=Notarized Developer ID" verdict to
+    // STDERR, not stdout. Capture both (2>&1) or the verdict string is empty and this
+    // guard false-rejects a perfectly notarized app. spctl exits non-zero only on
+    // rejection, so a clean exit already means accepted; we still assert the text.
+    let sp = '';
+    try {
+      sp = execSync(`spctl -a -t execute -vv ${JSON.stringify(appInDmg)} 2>&1`, { encoding: 'utf8' });
+    } catch (e) {
+      sp = `${e.stdout || ''}${e.stderr || ''}`;
+      throw new Error(`[dmg] app inside ${path.basename(dmgPath)} REJECTED by Gatekeeper: ${sp.trim()}`);
+    }
+    if (!/Notarized Developer ID|accepted/.test(sp)) {
+      throw new Error(`[dmg] app inside ${path.basename(dmgPath)} not Gatekeeper-accepted: ${sp.trim()}`);
+    }
+    console.log(`[dmg] verified embedded app signature + Gatekeeper inside ${path.basename(dmgPath)} ✅`);
+  } finally {
+    try { execFileSync('hdiutil', ['detach', mount, '-quiet'], { stdio: 'ignore' }); } catch { /* best-effort */ }
+  }
+}
+
+/**
+ * Did `stapler validate` fail because it could not REACH Apple, rather than
+ * because the ticket is absent? Network-class failures are inconclusive and must
+ * not be read as "unstapled" — see dmgHasStapledTicket for what that costs.
+ * Pure, so both shapes are testable without a network or a DMG.
+ */
+function isInconclusiveStaplerFailure(output) {
+  const out = String(output || '');
+  return (
+    /CloudKit|apple-cloudkit\.com|request timed out|ticket-delivery|Error 68/i.test(out) ||
+    isTransientNetworkMessage(out)
+  );
+}
+
+/**
+ * Does this DMG carry a stapled ticket?
+ *
+ * `stapler validate` CONSULTS THE NETWORK — it looks the ticket up against
+ * Apple's CloudKit ticket-delivery API — so on a flaky link a perfectly stapled
+ * DMG reports:
+ *
+ *   NSLocalizedDescription=The request timed out …
+ *   https://api.apple-cloudkit.com/database/1/com.apple.gk.ticket-delivery/…
+ *   CloudKit's response is inconsistent with expections: (null)
+ *   The validate action failed! Error 68.
+ *
+ * Observed 2026-08-27 on a DMG that this very hook had just stapled AND validated
+ * seconds earlier. Treating that as "not stapled" makes the idempotence guard
+ * rebuild and re-notarize a finished DMG — ~25 minutes thrown away for a network
+ * blip, which is precisely what that guard exists to prevent.
+ *
+ * So a network-class failure is INCONCLUSIVE, not negative — but the answer to an
+ * inconclusive result is to ASK AGAIN, not to ask a different question.
+ *
+ * WHY NOT GATEKEEPER (removed 2026-09-04): this used to fall back to
+ * `spctl -a -t open` and treat acceptance as proof of a stapled ticket. It is not.
+ * spctl will happily accept a DMG that is notarized but UNSTAPLED by assessing it
+ * ONLINE — and the fallback was only ever reached on a partially-up link, which is
+ * exactly when that online assessment succeeds. The comment claiming it "reads the
+ * stapled ticket straight off the file and needs no network" is what made the hole
+ * invisible. isDmgAlreadyValid would then return true, the rebuild+staple would be
+ * skipped, and an unstapled DMG would ship — failing Gatekeeper on any user machine
+ * that is offline at first launch, which is the precise failure stapling prevents.
+ *
+ * So: retry stapler itself (a blip is transient by definition), and if it is still
+ * inconclusive, report NOT stapled. The asymmetry decides it — a false negative
+ * costs one rebuild, a false positive ships a broken release.
+ */
+const STAPLER_VALIDATE_ATTEMPTS = 3;
+const STAPLER_RETRY_MS = 5000;
+
+/** Blocking sleep without a shell dependency (this script runs sync, macOS-only). */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function dmgHasStapledTicket(dmgPath) {
+  let lastOut = '';
+  for (let attempt = 1; attempt <= STAPLER_VALIDATE_ATTEMPTS; attempt++) {
+    try {
+      execFileSync('xcrun', ['stapler', 'validate', dmgPath], { stdio: 'pipe' });
+      return true;
+    } catch (err) {
+      lastOut = `${(err && err.stdout) || ''}${(err && err.stderr) || ''}${(err && err.message) || ''}`;
+      // A definite answer: genuinely not stapled.
+      if (!isInconclusiveStaplerFailure(lastOut)) return false;
+      if (attempt < STAPLER_VALIDATE_ATTEMPTS) {
+        console.warn(
+          `[dmg] stapler validate could not reach Apple for ${path.basename(dmgPath)} ` +
+            `(attempt ${attempt}/${STAPLER_VALIDATE_ATTEMPTS}) — retrying in ${STAPLER_RETRY_MS / 1000}s.`
+        );
+        sleepSync(STAPLER_RETRY_MS);
+      }
+    }
+  }
+  console.warn(
+    `[dmg] stapler validate never reached Apple for ${path.basename(dmgPath)} — ` +
+      `treating as NOT stapled so the DMG is rebuilt and stapled rather than shipped unverified. ` +
+      `Last output: ${lastOut.trim().slice(0, 200)}`
+  );
+  return false;
+}
+
+/** Non-throwing check: is this DMG already stapled with a Gatekeeper-accepted app inside? */
+function isDmgAlreadyValid(dmgPath) {
+  try {
+    if (!dmgHasStapledTicket(dmgPath)) return false;
+    verifyDmgAppSignature(dmgPath); // throws if the embedded app isn't accepted
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Assert the updater ZIP entries in latest*.yml match the on-disk zips. The updater
+ * downloads the ZIP, so a stale ZIP hash here is a real, shipping-breaking bug — fail
+ * the build loudly rather than ship a broken auto-update.
+ */
+function verifyZipManifest(outDir) {
+  const ymls = fs.readdirSync(outDir).filter((f) => /^latest.*\.yml$/.test(f));
+  for (const yml of ymls) {
+    const txt = fs.readFileSync(path.join(outDir, yml), 'utf8');
+    const re = /- url: (\S+\.zip)\s*\n\s*sha512: ([^\n]+)\s*\n\s*size: (\d+)/g;
+    let m;
+    while ((m = re.exec(txt)) !== null) {
+      const [, name, sha, size] = m;
+      const zipPath = path.join(outDir, name);
+      if (!fs.existsSync(zipPath)) continue;
+      const actualSha = sha512base64(zipPath);
+      const actualSize = String(fs.statSync(zipPath).size);
+      if (actualSha !== sha.trim() || actualSize !== size) {
+        throw new Error(
+          `[dmg-notarize] FATAL: ${yml} ZIP manifest mismatch for ${name} — the auto-updater would reject this build. ` +
+          `yml(sha512=${sha.trim().slice(0, 12)}…,size=${size}) vs disk(sha512=${actualSha.slice(0, 12)}…,size=${actualSize}).`
+        );
+      }
+      console.log(`[dmg-notarize] verified ZIP manifest: ${name} ✅`);
+    }
+  }
+}
+
+/**
+ * Where the DMG stage goes: the external build storage's tmp/ when it is set up
+ * (a staged Natively.app is large), else os.tmpdir().
+ */
+function resolveStageTempBase() {
+  const { resolveExternalBuildRoot } = require('./lib/external-build-storage.cjs');
+  const extRoot = resolveExternalBuildRoot({ repoRoot: path.join(__dirname, '..') });
+  if (extRoot) {
+    const extTmp = path.join(extRoot, 'tmp');
+    try {
+      fs.mkdirSync(extTmp, { recursive: true });
+      return extTmp;
+    } catch {
+      // Fall back to os.tmpdir() below.
+    }
+  }
+  return os.tmpdir();
+}
+
+/**
+ * Build a styled, Developer-ID-signed DMG from a single signed .app using create-dmg.
+ * create-dmg stages via `hdiutil create -srcfolder`, preserving the app's nested
+ * code signatures (unlike electron-builder's DMG layout, which corrupts them).
+ * Returns the output dmg path. Throws if create-dmg is unavailable or fails.
+ */
+function buildStyledDmg({ appPath, outDmg, identity }) {
+  // Stage ONLY the .app in an isolated temp dir so create-dmg's window contains
+  // exactly [Natively.app, Applications-droplink] and nothing stray.
+  const stage = fs.mkdtempSync(path.join(resolveStageTempBase(), 'natively-dmg-'));
+  const stagedApp = path.join(stage, path.basename(appPath));
+  execFileSync('ditto', [appPath, stagedApp], { stdio: 'inherit' }); // ditto preserves signatures
+
+  if (fs.existsSync(outDmg)) fs.unlinkSync(outDmg);
+
+  const args = [
+    '--volname', VOLNAME,
+    '--window-pos', '200', '120',
+    '--window-size', '660', '400',
+    '--icon-size', '120',
+    '--icon', path.basename(appPath), '170', '190',
+    '--app-drop-link', '490', '190',
+    '--hide-extension', path.basename(appPath),
+    '--no-internet-enable',
+    '--hdiutil-quiet',
+  ];
+  if (fs.existsSync(VOLICON)) args.push('--volicon', VOLICON);
+  // Background is opt-in. assets/dmg-background.png is 2640×1600 px = 660×400 pt at 4x,
+  // but create-dmg/Finder lays a non-@2x image 1:1 point-for-pixel into the 660×400-pt
+  // window, so the artwork renders off-scale/mis-positioned relative to the icon/drop-link.
+  // Ship the default white DMG window unless a correctly-sized background is explicitly enabled.
+  if (process.env.NATIVELY_DMG_BACKGROUND === '1' && fs.existsSync(BACKGROUND)) {
+    args.push('--background', BACKGROUND);
+  }
+  if (identity) args.push('--codesign', identity); // sign the DMG container itself
+  args.push(outDmg, stage);
+
+  try {
+    // Exit 2 (layout skipped, dmg still valid + signed) is accepted; exit 64 (the
+    // Finder AppleScript step failed) is retried; leftover working images are
+    // removed. See scripts/lib/create-dmg-run.cjs.
+    runCreateDmg({ args, outDmg });
+  } finally {
+    fs.rmSync(stage, { recursive: true, force: true });
+  }
+  return outDmg;
+}
+
+/** Find the signed .app for a given arch dir produced by electron-builder. */
+function findAppForArch(outDir, archDir) {
+  const dir = path.join(outDir, archDir);
+  if (!fs.existsSync(dir)) return null;
+  const app = fs.readdirSync(dir).find((f) => f.endsWith('.app'));
+  return app ? path.join(dir, app) : null;
+}
+
+/**
+ * Build, notarize, staple and verify ONE arch's styled DMG from its signed .app.
+ * Returns the dmg path, or null when electron-builder produced no app for the arch.
+ * Shared by this hook and by the early background job (scripts/dmg-job-run.cjs),
+ * so both make the DMG the same way.
+ */
+async function produceDmgForArch({ outDir, archDir, suffix, identity, creds, version }) {
+  const appPath = findAppForArch(outDir, archDir);
+  if (!appPath) return null;
+  const dmgName = `${VOLNAME}-${version}${suffix}.dmg`;
+  const outDmg = path.join(outDir, dmgName);
+
+  // Reuse an existing DMG only when it is stapled, its embedded app passes
+  // Gatekeeper, AND it is at least as new as this build's signed app. A full
+  // re-run of the build re-signs the apps, so a DMG from the previous run counts
+  // as stale and is rebuilt — deliberately: it holds the PREVIOUS run's app, and
+  // shipping it next to this run's fresh updater zips mixes two builds in one
+  // release. The skip still saves the notarize round-trip when this hook runs
+  // again over the same signed apps (e.g. a DMG the early job already finished).
+  if (fs.existsSync(outDmg)) {
+    const fresh = dmgIsNewerThanApp(fs.statSync(outDmg).mtimeMs, appSignedMtimeMs(appPath));
+    if (!fresh) {
+      console.log(`[dmg] ${dmgName} is older than this build's signed app — rebuilding it.`);
+    } else if (isDmgAlreadyValid(outDmg)) {
+      console.log(`[dmg] ${dmgName} already built + stapled + Gatekeeper-accepted — skipping rebuild.`);
+      return outDmg;
+    }
+  }
+
+  console.log(`[dmg] Rebuilding clean styled DMG for ${archDir}: ${dmgName}`);
+  buildStyledDmg({ appPath, outDmg, identity });
+
+  // Submit with a bounded retry. A single dropped TCP connection during this
+  // ~1 GB upload used to fail the ENTIRE signed build after the apps had already
+  // been notarized + stapled (~55 min of work). Only the submit is retried — the
+  // DMG bytes are unchanged and already signed, so re-submitting the same file is
+  // correct and avoids re-running ditto + hdiutil per attempt. A DECIDED verdict
+  // (Invalid/Rejected) never retries. See scripts/lib/notary-transient.cjs.
+  console.log(`[dmg] notarytool submit ${dmgName} (several minutes)…`);
+  await notarytoolSubmitWithRetry({ target: outDmg, credArgs: creds });
+  // Staple through Apple's CDN ticket-propagation lag (Error 65 / "Record not
+  // found"). Notarization has already SUCCEEDED at this point, so failing the
+  // build on that race would throw away the same hour the retry above protects.
+  // stapleWithRetry also runs `stapler validate`, matching isDmgAlreadyValid().
+  console.log(`[dmg] stapler staple ${dmgName}`);
+  await stapleWithRetry(outDmg, { maxAttempts: 6, baseDelayMs: 15000 });
+  // Verify the app INSIDE the freshly built+stapled dmg before trusting it.
+  verifyDmgAppSignature(outDmg);
+  return outDmg;
+}
+
+// Map electron-builder's arch output dirs to their final dmg names. eb names the
+// arm64 dmg "<name>-arm64.dmg" and the x64 dmg "<name>.dmg" (matching latest-mac.yml).
+// arm64 first: it is built first, and its early background job is awaited before
+// the x64 DMG starts, so two DMGs are never built or mounted at the same time.
+const ARCH_MAP = [
+  { archDir: 'mac-arm64', suffix: '-arm64' },
+  { archDir: 'mac', suffix: '' },
+];
+
+module.exports = async function afterAllArtifactBuild(buildResult) {
+  if (process.platform !== 'darwin') return [];
+
+  const artifacts = (buildResult && buildResult.artifactPaths) || [];
+  const ebDmgs = artifacts.filter((p) => p.endsWith('.dmg'));
+  // Signed builds disable electron-builder's DMG target (only building zip), so
+  // ebDmgs is empty there — fall back to buildResult.outDir or the first artifact's
+  // parent directory before defaulting to ./release.
+  const outDir = ebDmgs.length
+    ? path.dirname(ebDmgs[0])
+    : (buildResult && buildResult.outDir) ||
+      (artifacts.length ? path.dirname(artifacts[0]) : path.resolve(process.cwd(), 'release'));
+
+  const creds = notarytoolArgs();
+  if (!creds) {
+    console.log('[dmg] No notarization credentials in env — leaving electron-builder DMGs as-is (expected for unsigned/dev builds).');
+    return [];
+  }
+  const identity = resolveDeveloperIdIdentity();
+  if (!identity) {
+    console.warn('[dmg] No Developer ID identity resolved — cannot rebuild signed DMGs. Skipping.');
+    return [];
+  }
+
+  const rebuiltDmgs = [];
+  const version = require('../package.json').version;
+  const runId = process.env[RUN_ID_ENV];
+  for (const { archDir, suffix } of ARCH_MAP) {
+    // Only arm64 can have been started early (scripts/lib/dmg-job.cjs). Collect
+    // this run's result instead of building the same DMG a second time.
+    // waitForDmgJob never returns while the job is alive — on timeout it stops the
+    // job's process group first — so building inline below never races it.
+    if (archDir === EARLY_ARCH.archDir) {
+      const early = await waitForDmgJob({ outDir, archDir, runId });
+      if (earlyDmgDecision(early) === 'use') {
+        console.log(`[dmg] ${path.basename(early.dmg)} finished early in the background ✅`);
+        rebuiltDmgs.push(early.dmg);
+        continue;
+      }
+      if (early && early.status === 'done') {
+        console.warn(`[dmg] background ${archDir} DMG reported done but ${early.dmg} is missing — building it here instead.`);
+      } else if (early && early.status === 'failed') {
+        // The Intel half is done by now; one inline attempt is cheaper than failing
+        // the whole build. A second failure throws.
+        console.warn(`[dmg] background ${archDir} DMG failed (${early.error}) — building it here instead.`);
+      }
+    }
+    const dmg = await produceDmgForArch({ outDir, archDir, suffix, identity, creds, version });
+    if (dmg) rebuiltDmgs.push(dmg);
+  }
+
+  if (rebuiltDmgs.length === 0) {
+    console.warn('[dmg] No mac app dirs found to rebuild DMGs from.');
+    return [];
+  }
+
+  // Brand-new dmg bytes — refresh the manifest hashes, then assert the updater ZIPs.
+  patchYmlDmgHashes(outDir, rebuiltDmgs);
+  verifyZipManifest(outDir);
+  console.log('[dmg] All DMGs rebuilt (create-dmg) + signed + notarized + stapled + verified; ZIP manifest verified.');
+  return [];
+};
+
+// Exported for scripts/__tests__ — electron-builder only calls the default hook.
+module.exports.isInconclusiveStaplerFailure = isInconclusiveStaplerFailure;
+// Exported for scripts/dmg-job-run.cjs (the early arm64 DMG job).
+module.exports.produceDmgForArch = produceDmgForArch;
+module.exports.notarytoolArgs = notarytoolArgs;
+module.exports.resolveDeveloperIdIdentity = resolveDeveloperIdIdentity;

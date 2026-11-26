@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "kind": "seq-cls",
+  "id": "natively/auto-answer-decider-student",
+  "version": "2026.11.25-student-v5",
+  "about": "Auto Answer decider: ModernBERT-base (149.6M) student v5 = uniform soup of 3 seeds fine-tuned from student yt2 (lr 1e-5, 2 epochs, alpha 0.7) on dataset-v5 (real shared meetings + 78 public YouTube calls, Claude Opus 5.5 / Fable 5.2 + GPT 6.1 Sol labels, likely label errors re-voted) with an equal replay of yt2's synthetic rows. Thresholds fitted on the cleaned calib split (two strong labellers per moment): answer 0.815, silent 0.765, wait 0.855. Paid, private download: int8 per-channel reduced range on onnxruntime 1.24.3 (Windows, Apple Silicon macOS 14+), 4-bit MatMulNBits on 1.22 (Intel Macs, macOS 13). Gold (int8, app pipeline): 136/187 decided alone, 0 false answers. ml/auto-answer-decider.",
+  "graph": "decider-student-v5.int8.onnx",
+  "tokenizer": "tokenizer",
+  "labels": [
+    "answer",
+    "silent",
+    "wait"
+  ],
+  "state_room": 372,
+  "max_len": 512,
+  "head_max_len": 192,
+  "thresholds": {
+    "answer": 0.815,
+    "silent": 0.765,
+    "wait": 0.855
+  },
+  "files": [
+    {
+      "path": "tokenizer/tokenizer.json",
+      "sha256": "24e88219a52f2c11d47836d4877ec9218f1aeeceb04e913e437c65f13adb6015",
+      "bytes": 3583325
+    },
+    {
+      "path": "tokenizer/tokenizer_config.json",
+      "sha256": "1ac22ccabdfc304b50d42780a76bcd67b390c133fb9f17ddb946ca1e218ce164",
+      "bytes": 486
+    }
+  ],
+  "variants": {
+    "int8": {
+      "graph": "decider-student-v5.int8.onnx",
+      "sha256": "a0766f0e19c30283fdc661aacb98493cd393358318e089a17deeb868f62d8c45",
+      "bytes": 151292425,
+      "runtime": "ort-1.24"
+    },
+    "q4": {
+      "graph": "decider-student-v5.q4.onnx",
+      "sha256": "68ddf96a9fddf84b2372dae797698dccf3e8bc3fac4fceceec5f1341c650e2f3",
+      "bytes": 94228145,
+      "runtime": "ort-1.22"
+    }
+  }
+}
