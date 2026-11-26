@@ -5,7 +5,7 @@ import { X } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { chatScrimMotion, chatSheetMotion } from './chatSheetMotion';
 import { genMessageId } from '../utils/messageId';
-import { NativelyWordmark } from './NativelyWordmark';
+import { BrandWordmark } from './BrandWordmark';
 import { useResolvedTheme } from '../hooks/useResolvedTheme';
 import { splitGistLineStreaming } from '../lib/displayMarkup';
 // .lg-bubble.lg-bubble-lavender (your questions), imported here so the chat
@@ -563,7 +563,7 @@ ${contextString}`;
                                 a step under the launcher's 27px page title and well over the
                                 14px label heading the Usage tab's answers. */}
                             <div className="flex items-center text-text-secondary">
-                                <NativelyWordmark height={20} className="block shrink-0" />
+                                <BrandWordmark height={20} className="block shrink-0" />
                             </div>
                             <button
                                 onClick={handleClose}

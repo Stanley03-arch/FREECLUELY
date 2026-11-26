@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useT } from '../i18n';
 import { ToggleLeft, ToggleRight, Search, Calendar, Globe, Clock, ChevronRight, LayoutGrid, RefreshCw, Eye, EyeOff, Ghost, MonitorOff, Plus, Mail, Link as LinkIcon, ChevronDown, Bell, DownloadCloud, CheckCircle, AlertCircle, User, Sparkles, ArrowUpRight } from 'lucide-react';
 import { ProfileIntelligenceIcon } from './ProfileIntelligenceIcon';
-import { NativelyWordmark } from './NativelyWordmark';
+import { BrandWordmark } from './BrandWordmark';
 import mainui from "../UI_comp/mainui.png";
 import UpcomingCalendarCard from './ui/UpcomingCalendarCard';
 import AssistToday from './assist/AssistToday';
@@ -1016,7 +1016,7 @@ const Launcher: React.FC<LauncherProps> = ({ request, onStartMeeting, onOpenSett
                                             {/* The website's and the extension's "natively" wordmark, at the
                                                 navbar's 27px; currentColor, so it follows the theme. */}
                                             <h1 className="m-0 shrink-0 text-text-primary">
-                                                <NativelyWordmark height={27} className="block" />
+                                                <BrandWordmark height={27} className="block" />
                                             </h1>
 
                                             {/* Refresh Button */}

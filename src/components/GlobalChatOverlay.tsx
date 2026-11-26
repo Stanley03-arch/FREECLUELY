@@ -5,7 +5,7 @@ import { DiagramAwareMarkdown } from './diagram/DiagramAwareMarkdown';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { chatScrimMotion, chatSheetMotion } from './chatSheetMotion';
 import { genMessageId } from '../utils/messageId';
-import { NativelyWordmark } from './NativelyWordmark';
+import { BrandWordmark } from './BrandWordmark';
 // .lg-bubble.lg-bubble-lavender (your questions) and the send button's
 // .lg-button material; .mn-ask-send's own rules are in index.css.
 import '../ui-components/LiquidGlassButton.css';
@@ -504,7 +504,7 @@ const GlobalChatOverlay: React.FC<GlobalChatOverlayProps> = ({
                             ending on it, no divider. */}
                         <div className="flex items-center justify-between pl-6 pr-3 pt-4 pb-1 shrink-0">
                             <div className="flex items-center text-text-secondary">
-                                <NativelyWordmark height={20} className="block shrink-0" />
+                                <BrandWordmark height={20} className="block shrink-0" />
                             </div>
                             <button
                                 onClick={onClose}

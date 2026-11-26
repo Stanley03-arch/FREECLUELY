@@ -3535,6 +3535,8 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
     const ollamaVision = useVisionStates(ollamaVisionIds, ollamaStatus === 'detected');
     const [ollamaVisionOpen, setOllamaVisionOpen] = useState<string | null>(null);
     const [ollamaRestarted, setOllamaRestarted] = useState(false);
+    const [pullingModel, setPullingModel] = useState<string | null>(null);
+    const [pullProgressText, setPullProgressText] = useState<string>('');
     const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
     const [confirmBusy, setConfirmBusy] = useState(false);
     const [activeTab, setActiveTab] = useState<ProviderTabId>('cloud');
@@ -3542,6 +3544,57 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
     // the tab ids) but Math.max keeps a bad persisted value from shifting it off-track.
     const activeTabIndex = Math.max(0, PROVIDER_TABS.findIndex((tab) => tab.id === activeTab));
     const [isRefreshingOllama, setIsRefreshingOllama] = useState(false);
+
+    const handlePullOllamaModel = useCallback(async (modelTag: string) => {
+        if (pullingModel) return;
+        setPullingModel(modelTag);
+        setPullProgressText(`Starting download for ${modelTag}...`);
+        try {
+            const res = await fetch('http://localhost:11434/api/pull', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: modelTag, stream: true }),
+            });
+            if (!res.ok || !res.body) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    try {
+                        const evt = JSON.parse(trimmed) as { status?: string; completed?: number; total?: number; error?: string };
+                        if (evt.error) throw new Error(evt.error);
+                        if (evt.total && evt.completed !== undefined) {
+                            const pct = Math.min(100, Math.round((evt.completed / evt.total) * 100));
+                            setPullProgressText(`${modelTag}: ${evt.status || 'downloading'} (${pct}%)`);
+                        } else if (evt.status) {
+                            setPullProgressText(`${modelTag}: ${evt.status}`);
+                        }
+                    } catch (parseErr) {
+                        if (parseErr instanceof Error && parseErr.message !== 'Unexpected end of JSON input') {
+                            throw parseErr;
+                        }
+                    }
+                }
+            }
+            setPullProgressText(`${modelTag} installed!`);
+            await checkOllama(false);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Download failed';
+            setPullProgressText(`Failed to pull ${modelTag}: ${msg}`);
+        } finally {
+            setPullingModel(null);
+        }
+    }, [pullingModel]);
     // Roving tabindex: only the selected tab is a tab stop, so Arrow/Home/End
     // are the ONLY way to reach the other two. Without this a keyboard user
     // landed on the active tab and could never leave it.
@@ -6672,7 +6725,40 @@ export const AIProvidersSettings: React.FC<AIProvidersSettingsProps> = ({
                                 Telling that user nothing is installed sends them
                                 to fix something that is not broken. */}
                             <div className="text-xs aip-muted">
-                                {t('No model here can generate text yet. Embedding models, such as the one Natively uses for retrieval, cannot chat. Run `ollama pull qwen2.5:3b` to add one.')}
+                                {t('No model here can generate text yet. Install a free local model with one click below:')}
+                            </div>
+                        </div>
+                    )}
+
+                    {ollamaStatus === 'detected' && (
+                        <div className="mt-4 pt-4 border-t border-white/10 space-y-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium aip-primary">{t('1-Click Free Local Models')}</span>
+                                {pullProgressText && (
+                                    <span className="text-[11px] aip-muted truncate max-w-[260px]">{pullProgressText}</span>
+                                )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {[
+                                    { tag: 'llama3.2', label: 'Llama 3.2 (Fast · Free)' },
+                                    { tag: 'qwen2.5:3b', label: 'Qwen 2.5 3B (Balanced)' },
+                                    { tag: 'deepseek-r1:1.5b', label: 'DeepSeek R1 1.5B (Reasoning)' },
+                                ].map(({ tag, label }) => {
+                                    const installed = ollamaModels.some(m => m === tag || m.startsWith(`${tag}:`));
+                                    const isPullingThis = pullingModel === tag;
+                                    return (
+                                        <button
+                                            key={tag}
+                                            type="button"
+                                            disabled={installed || !!pullingModel}
+                                            onClick={() => void handlePullOllamaModel(tag)}
+                                            className="aip-btn"
+                                            data-size="sm"
+                                        >
+                                            {isPullingThis ? t('Downloading...') : installed ? `${label} ✓` : `+ ${label}`}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}

@@ -15,7 +15,7 @@ import '../ui-components/LiquidGlassButton.css';
 import { LiquidGlassButton, useLensTracking } from '../ui-components/LiquidGlassButton';
 import { isMac } from '../utils/platformUtils';
 import EditableTextBlock from './EditableTextBlock';
-import { NativelyWordmark } from './NativelyWordmark';
+import { BrandWordmark } from './BrandWordmark';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light';
@@ -767,7 +767,7 @@ const UsageInteraction: React.FC<{
             {interaction.answer && (
                 <motion.div {...enter({ y: 8 }, staggerDelay + 0.08)} className="group/a">
                     <div className="mb-2 flex items-center select-none">
-                        <NativelyWordmark height={14} className="block shrink-0 text-text-secondary" />
+                        <BrandWordmark height={14} className="block shrink-0 text-text-secondary" />
                     </div>
                     <div className="min-w-0">
                         <div className="text-text-secondary text-[15px] leading-relaxed max-w-none select-text">
