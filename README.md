@@ -9,7 +9,6 @@
 
 <br/>
 
-[![License](https://img.shields.io/badge/License-Personal%20Use%20Source-10B981?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20iOS%20%26%20Android-059669?style=flat-square)](https://github.com/Stanley03-arch/FREECLUELY/releases/latest)
 [![Releases](https://img.shields.io/github/v/release/Stanley03-arch/FREECLUELY?style=flat-square&color=10B981)](https://github.com/Stanley03-arch/FREECLUELY/releases/latest)
 [![Stars](https://img.shields.io/github/stars/Stanley03-arch/FREECLUELY?style=flat-square&color=gold)](https://github.com/Stanley03-arch/FREECLUELY)
